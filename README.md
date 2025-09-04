@@ -54,7 +54,8 @@ git clone https://github.com/HongYue1/mpv-config.git && mkdir -p ~/.config/mpv &
 Though this does come at the cost of a little bit higher CPU/GPU load.
 What is going on?
 uosc places performance as one of its top priorities, but it might feel a bit sluggish because during a video playback, the UI rendering frequency is chained to its frame rate. To test this, you can pause the video which will switch refresh rate to be closer or match the frequency of your monitor, and the UI should feel smoother. This is mpv limitation, and not much we can do about it on our side.
-
+- press `tab` to toggle UI hiding or always showing.
+- To see available keybindings or to edit them look in the `input.conf`.
 ---
 
 ## Scripts used:
