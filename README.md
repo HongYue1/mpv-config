@@ -6,7 +6,7 @@
 ---
 
 ## Installation (Windows)
-* Download the latest 64bit (or 64bit-v3 for newer CPUs) mpv Windows build by shinchiro [here](https://mpv.io/installation/) or directly from [here](https://github.com/shinchiro/mpv-winbuild-cmake/releases) and extract its contents into a folder of your choice. This is now your mpv folder and can be placed wherever you want. Make sure to put it in a place you won't move it from or delete. 
+* Download the latest 64bit `mpv-x86_64-gcc-*.7z` (or 64bit-v3 for newer CPUs `mpv-x86_64-v3-*.7z`) mpv Windows build by shinchiro [here](https://mpv.io/installation/) or directly from [here](https://github.com/shinchiro/mpv-winbuild-cmake/releases) and extract its contents into a folder of your choice. This is now your mpv folder and can be placed wherever you want. Make sure to put it in a place you won't move it from or delete. 
 * Run `mpv-install.bat`, which is located in the `installer` folder, with administrator privileges by right-clicking and selecting run as administrator, after it's done, you'll get a prompt to open Control Panel and set mpv as the default player.
 * [Download](https://github.com/HongYue1/mpv-config/archive/refs/heads/main.zip) and extract the `portable_config` folder from this repo to the mpv folder you just made, beside the `mpv.exe`.
 * For mpv updates, right click updater.bat and run as administrator, then follow the instructions. There will be an option to install yt-dlp to be able to stream YouTube videos and any other websites supported by [yt-dlp,](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) if you want. Once the initial run of updater.bat has completed a settings.xml file will be generated to save your preferences. 
