@@ -15,7 +15,7 @@
 
 
 ## Installation (Linux/Mac OS)
-- Install mpv using your package manager depending on your distro. Ubuntu: `sudo dnf install mpv` | Archlinux `sudo pacman -S mpv` or `yay -S mpv-git`, etc...
+- Install mpv using your package manager depending on your distro. Ubuntu: `sudo apt install mpv` | Archlinux `sudo pacman -S mpv` or `yay -S mpv-git`, etc...
 - [Download](https://github.com/HongYue1/mpv-config/archive/refs/heads/main.zip) this repo and extract it. Copy the content inside the `portable_config` folder to `~/.config/mpv/` create it if it doesn't exist.
 - Or you can do it automatically using `git` if you have it installed:
 
