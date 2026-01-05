@@ -18,6 +18,7 @@ local options = {
     load_autosub_binding = "alt+y",
     autoload_autosub_binding = "alt+Y",
     cache_dir = ".cache/ytsub/",
+    filter_sub_single_line = false,
 }
 require("mp.options").read_options(options)
 
@@ -34,7 +35,7 @@ if not res or not res.is_dir then
         options.cache_dir = string.gsub(options.cache_dir, "/", "\\")
         command = {
             name = "subprocess",
-            args = {"cmd", "/c", "mkdir", options.cache_dir},
+            args = {"cmd", "/c", "if not exist", options.cache_dir, "mkdir", options.cache_dir},
             playback_only = false,
         }
     else
@@ -52,6 +53,21 @@ end
 
 local function info(msg)
     mp.osd_message('ytsub : ' .. msg, 5)
+end
+
+local function filter_sub(path)
+    local lines = {}
+    for line in io.lines(path) do
+        table.insert(lines, line)
+    end
+    local out = io.open(path, "w")
+    for i,line in pairs(lines) do
+        if i < 5 or i % 8 == 5 or i % 8 == 7 or i % 8 == 0 then
+            out:write(line)
+            out:write("\n")
+        end
+        i = i + 1
+    end
 end
 
 local function load_autosub(lang, sub_info, ytid, is_primary)
@@ -101,6 +117,9 @@ local function load_autosub(lang, sub_info, ytid, is_primary)
                 end
             end
         end
+        if sub_is_available and options.filter_sub_single_line then
+            filter_sub(subfile)
+        end
     end
 
     -- load the subtitle file as track ans select it
@@ -136,7 +155,7 @@ local function ytsub(is_auto)
 
     local j = utils.parse_json(ytdl_output['stdout'])
     local subs = j['automatic_captions']
-    if subs == nil then
+    if subs == nil or next(subs) == nil then
         info('no auto-subs found')
         return
     end
@@ -176,5 +195,5 @@ local function ytsub(is_auto)
     end
 end
 
-mp.add_key_binding(options.load_autosub_binding, "load", function() ytsub(false) end)
-mp.add_key_binding(options.autoload_autosub_binding, "auto", function() ytsub(true) end)
+mp.add_key_binding(options.load_autosub_binding, function() ytsub(false) end)
+mp.add_key_binding(options.autoload_autosub_binding, function() ytsub(true) end)
