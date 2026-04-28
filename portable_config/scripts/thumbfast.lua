@@ -43,10 +43,11 @@ local o = {
     mpv_path = "mpv",
 
     -- Internal tuning.
-    file_check_interval = 1 / 60,
-    seek_interval = 1 / 30,
-    exact_seek_delay = 0.12,
-    child_poll_interval = 1 / 120,
+    -- These may be overridden in thumbfast.conf.
+    file_check_interval = 1 / 30,
+    seek_interval = 0.05,
+    exact_seek_delay = 0.25,
+    child_poll_interval = 1 / 60,
 }
 
 options.read_options(o, "thumbfast")
@@ -91,6 +92,14 @@ o.max_width = math.max(1, tonumber(o.max_width) or 200)
 o.max_height = math.max(1, tonumber(o.max_height) or 200)
 o.scale_factor = math.max(1, math.floor(tonumber(o.scale_factor) or 1))
 
+o.file_check_interval = math.max(0.001, tonumber(o.file_check_interval) or (1 / 30))
+o.seek_interval = math.max(0.001, tonumber(o.seek_interval) or 0.05)
+o.exact_seek_delay = tonumber(o.exact_seek_delay)
+if o.exact_seek_delay == nil then
+    o.exact_seek_delay = 0.25
+end
+o.child_poll_interval = math.max(0.001, tonumber(o.child_poll_interval) or (1 / 60))
+
 local thumbnail_bgra = o.thumbnail .. ".bgra"
 
 local mpv_path = o.mpv_path
@@ -102,6 +111,15 @@ local properties = {}
 
 local disabled = true
 local dirty = false
+local dirty_timer
+
+local function mark_dirty()
+    dirty = true
+
+    if dirty_timer and not dirty_timer:is_enabled() then
+        dirty_timer:resume()
+    end
+end
 
 local effective_w = o.max_width
 local effective_h = o.max_height
@@ -385,6 +403,7 @@ local function make_child_script(command_file, token)
         "local command_file = " .. string.format("%q", command_file) .. "\n" ..
         "local token = " .. string.format("%q", token) .. "\n" ..
         "local last_seq = -1\n" ..
+        "local last_raw = nil\n" ..
         "local function read_all(path)\n" ..
         "    local f = io.open(path, 'rb')\n" ..
         "    if not f then return nil end\n" ..
@@ -411,6 +430,8 @@ local function make_child_script(command_file, token)
         "mp.add_periodic_timer(" .. tostring(o.child_poll_interval) .. ", function()\n" ..
         "    local s = read_all(command_file)\n" ..
         "    if not s or s == '' then return end\n" ..
+        "    if s == last_raw then return end\n" ..
+        "    last_raw = s\n" ..
         "    local ok, cmd = pcall(utils.parse_json, s)\n" ..
         "    if ok then pcall(apply, cmd) end\n" ..
         "end)\n"
@@ -488,6 +509,8 @@ local function spawn(time)
 
     generation = generation + 1
 
+    local start_time = tonumber(time) or 0
+
     local proc = {
         generation = generation,
         token = pid .. ":" .. tostring(generation),
@@ -496,6 +519,7 @@ local function spawn(time)
         output = o.thumbnail .. ".raw." .. tostring(generation),
         seq = 0,
         quitting = false,
+        start_time = start_time,
     }
 
     if not write_child_script(proc) then
@@ -534,7 +558,7 @@ local function spawn(time)
         "--edition=" .. tostring(properties.edition or "auto"),
         "--vid=" .. tostring(vid),
 
-        "--start=" .. tostring(tonumber(time) or 0),
+        "--start=" .. tostring(start_time),
         allow_fast_seek and "--hr-seek=no" or "--hr-seek=yes",
 
         "--ytdl-format=worst",
@@ -606,6 +630,18 @@ end
 
 local seek_timer
 local exact_seek_timer
+local file_timer
+local file_poll_until = 0
+
+local function arm_file_poll(seconds)
+    seconds = tonumber(seconds) or 2
+
+    file_poll_until = math.max(file_poll_until, mp.get_time() + seconds)
+
+    if file_timer and not file_timer:is_enabled() then
+        file_timer:resume()
+    end
+end
 
 local function send_seek(fast)
     if current and last_seek_time ~= nil then
@@ -626,19 +662,40 @@ seek_timer = mp.add_timeout(o.seek_interval, function()
 end)
 seek_timer:kill()
 
-exact_seek_timer = mp.add_timeout(o.exact_seek_delay, function()
-    if allow_fast_seek then
+exact_seek_timer = mp.add_timeout(math.max(0.001, o.exact_seek_delay), function()
+    if allow_fast_seek and o.exact_seek_delay >= 0 then
         send_seek(false)
     end
 end)
 exact_seek_timer:kill()
 
 local function request_seek()
+    local spawned = false
+
     if not current then
-        spawn(last_seek_time or mp.get_property_number("time-pos", 0))
+        spawned = spawn(last_seek_time or mp.get_property_number("time-pos", 0))
     end
 
     if not current then return end
+
+    local same_as_spawn =
+        spawned and
+        current.start_time ~= nil and
+        last_seek_time ~= nil and
+        math.abs(last_seek_time - current.start_time) < 0.001
+
+    arm_file_poll((allow_fast_seek and o.exact_seek_delay >= 0 and o.exact_seek_delay or 0) + 2)
+
+    if same_as_spawn then
+        if allow_fast_seek and o.exact_seek_delay >= 0 then
+            if exact_seek_timer:is_enabled() then
+                exact_seek_timer:kill()
+            end
+            exact_seek_timer:resume()
+        end
+
+        return
+    end
 
     if seek_timer:is_enabled() then
         pending_seek = true
@@ -648,7 +705,7 @@ local function request_seek()
         seek_timer:resume()
     end
 
-    if allow_fast_seek then
+    if allow_fast_seek and o.exact_seek_delay >= 0 then
         if exact_seek_timer:is_enabled() then
             exact_seek_timer:kill()
         end
@@ -729,8 +786,6 @@ local function draw(w, h, script)
     end
 end
 
-local file_timer
-
 local function check_new_thumb()
     local proc = current
     if not proc then return false end
@@ -742,6 +797,7 @@ local function check_new_thumb()
     end
 
     local finfo = utils.file_info(tmp)
+    if not fino and false then end
     if not finfo or not finfo.is_file or finfo.size <= 0 then
         os.remove(tmp)
         return false
@@ -777,6 +833,13 @@ file_timer = mp.add_periodic_timer(o.file_check_interval, function()
     if check_new_thumb() then
         draw(real_w, real_h, script_name)
     end
+
+    if mp.get_time() > file_poll_until
+        and not pending_seek
+        and not exact_seek_timer:is_enabled()
+    then
+        file_timer:kill()
+    end
 end)
 file_timer:kill()
 
@@ -785,6 +848,7 @@ local function clear(no_activity)
     seek_timer:kill()
     exact_seek_timer:kill()
 
+    file_poll_until = 0
     pending_seek = false
     last_seek_time = nil
 
@@ -846,10 +910,6 @@ local function thumb(time, r_x, r_y, script)
     last_seek_time = time
     request_seek()
 
-    if not file_timer:is_enabled() then
-        file_timer:resume()
-    end
-
     bump_activity()
 end
 
@@ -859,11 +919,12 @@ end
 
 local function update_property_dirty(name, value)
     properties[name] = value
-    dirty = true
 
     if name == "tone-mapping" then
         last_tone_mapping = nil
     end
+
+    mark_dirty()
 end
 
 local function update_tracklist(_, value)
@@ -880,7 +941,7 @@ local function update_tracklist(_, value)
         end
     end
 
-    dirty = true
+    mark_dirty()
 end
 
 local function sync_property_to_child(prop, val)
@@ -906,7 +967,7 @@ local function sync_property_to_child(prop, val)
         })
     end
 
-    dirty = true
+    mark_dirty()
 end
 
 local function watch_changes()
@@ -945,16 +1006,27 @@ local function watch_changes()
         if resized then
             local seek_time = last_seek_time or mp.get_property_number("time-pos", 0)
 
+            local was_showing = show_thumbnail
+            local old_x, old_y = x, y
+            local old_script_name = script_name
+
             stop_child()
             clear(true)
+
+            show_thumbnail = was_showing
+            if was_showing then
+                x, y = old_x, old_y
+                script_name = old_script_name
+                last_x, last_y = old_x, old_y
+            end
 
             real_w, real_h = nil, nil
             last_real_w, last_real_h = nil, nil
 
             spawn(seek_time)
 
-            if show_thumbnail or o.spawn_first then
-                file_timer:resume()
+            if was_showing or o.spawn_first then
+                arm_file_poll(2)
             end
         else
             if rotate ~= last_rotate then
@@ -987,11 +1059,12 @@ local function watch_changes()
 
     if not current and not disabled and o.spawn_first and resized then
         spawn(mp.get_property_number("time-pos", 0))
-        file_timer:resume()
+        arm_file_poll(2)
     end
 end
 
-mp.add_periodic_timer(0.05, watch_changes)
+dirty_timer = mp.add_timeout(0.001, watch_changes)
+dirty_timer:kill()
 
 local function remove_thumbnail_files()
     os.remove(o.thumbnail)
@@ -1017,7 +1090,7 @@ local function file_loaded()
     calc_dimensions()
     publish_info(effective_w, effective_h)
 
-    dirty = true
+    mark_dirty()
 end
 
 local function shutdown()
