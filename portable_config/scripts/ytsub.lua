@@ -3,8 +3,8 @@ local function want(name)
   local out; if xpcall(
       function()  out = require(name) end,
       function(e) out = e end)
-  then return out          -- success                                     
-  else return nil, out end -- error                                       
+  then return out          -- success
+  else return nil, out end -- error
 end
 
 local utils = require('mp.utils')
@@ -14,7 +14,7 @@ local http = want("socket.http")
 local https = want("ssl.https")
 
 local options = {
-    source_lang = "fr",
+    source_lang = nil, -- en fr es de and the like
     load_autosub_binding = "alt+y",
     autoload_autosub_binding = "alt+Y",
     cache_dir = ".cache/ytsub/",
@@ -52,6 +52,7 @@ if not res or not res.is_dir then
 end
 
 local function info(msg)
+    print(msg)
     mp.osd_message('ytsub : ' .. msg, 5)
 end
 
@@ -61,23 +62,32 @@ local function filter_sub(path)
         table.insert(lines, line)
     end
     local out = io.open(path, "w")
-    for i,line in pairs(lines) do
-        if i < 5 or i % 8 == 5 or i % 8 == 7 or i % 8 == 0 then
-            out:write(line)
-            out:write("\n")
+    if out ~= nil then
+        for i,line in pairs(lines) do
+            if i < 5 or i % 8 == 5 or i % 8 == 7 or i % 8 == 0 then
+                out:write(line)
+                out:write("\n")
+            end
+            i = i + 1
         end
-        i = i + 1
     end
 end
 
 local function load_autosub(lang, sub_info, ytid, is_primary)
     local lang_name
     local url
-    for _,v in pairs(sub_info) do
-        lang_name = v["name"]
-        if v["ext"] == "vtt" then
-            url = v["url"]
+
+    if sub_info ~= nil then
+        for _,v in pairs(sub_info) do
+            lang_name = v["name"]
+            if v["ext"] == "vtt" then
+                url = v["url"]
+            end
         end
+    end
+    if lang_name == nil or url == nil then
+        info('could not get lang name or url from sub info')
+        return
     end
 
     info('loading '..lang_name)
@@ -95,20 +105,21 @@ local function load_autosub(lang, sub_info, ytid, is_primary)
         -- sub file not already present, download
         if http ~= nil and https ~= nil then
             -- downloading via direct url
-            local body, _ = http.request(url)
-            if body ~= nil then
+            local body, status = http.request(url)
+            if body ~= nil and status == 200 then
                 f = assert(io.open(subfile, 'wb'))
                 f:write(body)
                 f:close()
                 sub_is_available = true
             end
-        else
-            -- lua http modules not available, download via yt-dlp
+        end
+        if not sub_is_available then
+            -- lua http modules not available or download failed, download via yt-dlp
             local ytdl_path = mp.get_property_native('user-data/mpv/ytdl/path')
             if ytdl_path ~= nil then
                 mp.command_native({
                     name = "subprocess",
-                    args = {ytdl_path, "--skip-download", "--sub-lang", lang, "--write-auto-sub", "-o", subfile_base, ytid}
+                    args = {ytdl_path, "--skip-download", "--sub-lang", lang, "--write-auto-sub", "-o", subfile_base, "--", ytid}
                 })
                 f = io.open(subfile, "r")
                 if f ~= nil then
@@ -122,7 +133,7 @@ local function load_autosub(lang, sub_info, ytid, is_primary)
         end
     end
 
-    -- load the subtitle file as track ans select it
+    -- load the subtitle file as track and select it
     if sub_is_available then
         if is_primary then
             mp.command("sub-add " .. subfile .. " select 'youtube auto-sub' '" .. lang .. "'")
@@ -174,10 +185,12 @@ local function ytsub(is_auto)
         end
 
         load_autosub(orig_lang, subs[orig_lang], j["id"], true)
-        if orig_lang == source_lang.."-orig" then
-            info("source language and original language are the same ("..source_lang..")")
-        else
-            load_autosub(source_lang, subs[source_lang], j["id"], false)
+        if source_lang ~= nil then
+            if orig_lang == source_lang.."-orig" then
+                info("source language and original language are the same ("..source_lang..")")
+            else
+                load_autosub(source_lang, subs[source_lang], j["id"], false)
+            end
         end
 
     else
