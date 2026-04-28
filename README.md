@@ -390,13 +390,12 @@ profiles.conf
 
 ## Windows-Only Option
 
-This option does not work on Linux:
+In `mpv.conf`:
+Only enable this option if you are on windows and you use `gpu-api=d3d11`:
 
 ```conf
 d3d11-exclusive-fs
 ```
-
-If you are using Linux, comment it out or delete it from `mpv.conf`.
 
 ---
 
