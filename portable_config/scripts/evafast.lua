@@ -30,7 +30,7 @@ local opts = {
 
     -- Playback speed cap when subtitles are displayed.
     -- Use "no" to disable subtitle-specific cap.
-    subs_speed_cap = 1.6,
+    subs_speed_cap = "1.6",
 
     -- Exponential speed ramping.
     -- Example: speed_increase=0.05, speed_decrease=0.025
@@ -45,21 +45,34 @@ local opts = {
     -- Show current speed during speedup-target mode.
     show_speed_target = false,
 
+    -- Minimum time between speed OSD/uosc speed flashes.
+    -- Set to 0 to disable throttling.
+    speed_osd_interval = 0.10,
+
     -- Show seek / timeline feedback.
     show_seek = true,
 
     -- Look ahead for smoother transition when subs_speed_cap is enabled.
     lookahead = false,
+
+    -- Minimum time between subtitle lookahead checks.
+    -- Only used when lookahead=yes.
+    lookahead_cache_interval = 0.15,
 }
 
 local options = require "mp.options"
 options.read_options(opts, "evafast")
 
-local VERSION = "2.0.0"
+local VERSION = "2.1.0"
 local EPS = 0.0001
 
 local uosc_available = false
 local speed_timer = nil
+
+local sub_is_active = false
+local lookahead_cache_time = -math.huge
+local lookahead_cache_value = nil
+local last_speed_osd_time = -math.huge
 
 local state = {
     key_down = false,
@@ -102,9 +115,25 @@ opts.speed_decrease = normalize_number(opts.speed_decrease, 0.1, 0)
 opts.speed_interval = normalize_number(opts.speed_interval, 0.05, 0.001)
 opts.speed_cap = normalize_number(opts.speed_cap, 2, 1)
 opts.subs_speed_cap = normalize_optional_number(opts.subs_speed_cap)
+opts.speed_osd_interval = normalize_number(opts.speed_osd_interval, 0.10, 0)
+opts.lookahead_cache_interval = normalize_number(opts.lookahead_cache_interval, 0.15, 0)
 
 if opts.subs_speed_cap then
     opts.subs_speed_cap = math.max(1, opts.subs_speed_cap)
+end
+
+local function invalidate_lookahead_cache()
+    lookahead_cache_time = -math.huge
+    lookahead_cache_value = nil
+end
+
+if opts.subs_speed_cap then
+    sub_is_active = mp.get_property_native("sub-start") ~= nil
+
+    mp.observe_property("sub-start", "native", function(_, value)
+        sub_is_active = value ~= nil
+        invalidate_lookahead_cache()
+    end)
 end
 
 local function almost_equal(a, b)
@@ -139,7 +168,7 @@ local function step_up(speed, cap)
     end
 
     if delta <= 0 then
-        return cap
+        return speed
     end
 
     local next_speed = math.min(speed + delta, cap)
@@ -167,7 +196,7 @@ local function step_down(speed, floor)
     end
 
     if delta <= 0 then
-        return floor
+        return speed
     end
 
     local next_speed = math.max(speed - delta, floor)
@@ -180,33 +209,41 @@ local function step_down(speed, floor)
 end
 
 local function transition_time(from_speed, to_speed)
-    from_speed = tonumber(from_speed) or 1
-    to_speed = tonumber(to_speed) or 1
+    from_speed = math.max(1, tonumber(from_speed) or 1)
+    to_speed = math.max(1, tonumber(to_speed) or 1)
 
     if almost_equal(from_speed, to_speed) then
         return 0
     end
 
-    local speed = from_speed
-    local elapsed = 0
-    local guard = 0
+    local increasing = from_speed < to_speed
+    local modifier = increasing and opts.speed_increase or opts.speed_decrease
 
-    while not almost_equal(speed, to_speed) and guard < 10000 do
-        guard = guard + 1
-        elapsed = elapsed + opts.speed_interval
-
-        if speed < to_speed then
-            speed = step_up(speed, to_speed)
-        else
-            speed = step_down(speed, to_speed)
-        end
+    if modifier <= 0 then
+        return math.huge
     end
 
-    return elapsed
+    local steps
+
+    if opts.multiply_modifier then
+        if increasing then
+            steps = math.ceil(math.log(to_speed / from_speed) / math.log(1 + modifier) - EPS)
+        else
+            if modifier >= 1 then
+                steps = 1
+            else
+                steps = math.ceil(math.log(to_speed / from_speed) / math.log(1 - modifier) - EPS)
+            end
+        end
+    else
+        steps = math.ceil(math.abs(to_speed - from_speed) / modifier - EPS)
+    end
+
+    return math.max(0, steps) * opts.speed_interval
 end
 
 local function subtitle_active()
-    return opts.subs_speed_cap ~= nil and mp.get_property_native("sub-start") ~= nil
+    return opts.subs_speed_cap ~= nil and sub_is_active
 end
 
 local function seconds_to_next_subtitle()
@@ -248,13 +285,26 @@ local function seconds_to_next_subtitle()
     return nil
 end
 
+local function seconds_to_next_subtitle_cached()
+    local now = mp.get_time()
+
+    if opts.lookahead_cache_interval > 0 and now - lookahead_cache_time < opts.lookahead_cache_interval then
+        return lookahead_cache_value
+    end
+
+    lookahead_cache_time = now
+    lookahead_cache_value = seconds_to_next_subtitle()
+
+    return lookahead_cache_value
+end
+
 local function base_speed_cap(speed)
     local cap = opts.speed_cap
 
     if opts.subs_speed_cap and subtitle_active() then
         cap = opts.subs_speed_cap
     elseif opts.lookahead and opts.subs_speed_cap then
-        local next_sub = seconds_to_next_subtitle()
+        local next_sub = seconds_to_next_subtitle_cached()
 
         if next_sub then
             local correction_time = transition_time(speed, opts.subs_speed_cap)
@@ -290,7 +340,7 @@ local function effective_speed_cap(speed)
             normal_target_cap = math.min(normal_target_cap, opts.subs_speed_cap)
         end
 
-        -- Keep this slightly above 1 so the target mode does not get stuck.
+        -- Keep this slightly above 1 so target mode does not get stuck.
         normal_target_cap = math.max(normal_target_cap, 1.1)
 
         local correction_time = transition_time(speed, normal_target_cap)
@@ -320,8 +370,18 @@ local function show_speed(speed)
         return
     end
 
+    if opts.speed_osd_interval > 0 then
+        local now = mp.get_time()
+
+        if now - last_speed_osd_time < opts.speed_osd_interval then
+            return
+        end
+
+        last_speed_osd_time = now
+    end
+
     if uosc_available then
-        mp.command("script-binding uosc/flash-speed")
+        mp.commandv("script-binding", "uosc/flash-speed")
     else
         mp.osd_message(("▶▶ x%.2f"):format(speed))
     end
@@ -337,11 +397,9 @@ local function reset_state_at_normal_speed()
     state.display_mode = "normal"
 end
 
-local function timer_needed()
-    local speed = get_speed()
-
+local function timer_needed_at(speed)
     if state.paused_ramp then
-        return true
+        return speed > 1 + EPS
     end
 
     if state.accelerating or state.toggle or state.target_time then
@@ -405,7 +463,7 @@ adjust_speed = function()
         return
     end
 
-    if timer_needed() then
+    if timer_needed_at(speed) then
         ensure_timer()
     else
         stop_timer()
@@ -427,7 +485,6 @@ local function start_speedup(mode)
     end
 
     adjust_speed()
-    ensure_timer()
 end
 
 local function start_slowdown()
@@ -438,10 +495,6 @@ local function start_slowdown()
     state.repeated = false
 
     adjust_speed()
-
-    if timer_needed() then
-        ensure_timer()
-    end
 end
 
 local function perform_seek()
@@ -449,10 +502,12 @@ local function perform_seek()
         return
     end
 
+    invalidate_lookahead_cache()
+
     mp.commandv("seek", opts.seek_distance)
 
     if opts.show_seek and uosc_available then
-        mp.command("script-binding uosc/flash-timeline")
+        mp.commandv("script-binding", "uosc/flash-timeline")
     end
 end
 
@@ -465,7 +520,7 @@ local function handle_down()
         mp.osd_message("▶▶")
     end
 
-    if timer_needed() then
+    if timer_needed_at(get_speed()) then
         ensure_timer()
     end
 end
@@ -541,6 +596,10 @@ end
 mp.register_script_message("uosc-version", function()
     uosc_available = true
 end)
+
+mp.register_script_message("speedup", evafast_speedup)
+mp.register_script_message("slowdown", evafast_slowdown)
+mp.register_script_message("toggle", evafast_toggle)
 
 mp.register_script_message("speedup-target", function(time)
     time = tonumber(time)
