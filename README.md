@@ -455,12 +455,12 @@ input.conf
 
 # Included Scripts
 
-| Script                                                                          | Description                                                  |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Script                                                                          | Description                                                  | Notes                        |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------ | ---------------------------- |
 | [uosc](https://github.com/darsain/uosc)                                         | Adds a minimalist and highly customizable GUI.               |
-| [evafast](https://github.com/po5/evafast)                                       | Fast-forwarding and seeking on a single key.                 |
-| [thumbfast](https://github.com/po5/thumbfast)                                   | High-performance on-the-fly thumbnail generation.            |
-| [memo](https://github.com/po5/memo)                                             | Recent files/history menu with optional uosc integration.    |
+| [evafast](https://github.com/po5/evafast)                                       | Fast-forwarding and seeking on a single key.                 | Refactored with GPT 5.5 High |
+| [thumbfast](https://github.com/po5/thumbfast)                                   | High-performance on-the-fly thumbnail generation.            | Refactored with GPT 5.5 High |
+| [memo](https://github.com/po5/memo)                                             | Recent files/history menu with optional uosc integration.    | Refactored with GPT 5.5 High |
 | [quality-menu](https://github.com/natural-harmonia-gropius/mpv-quality-menu)    | Allows changing streamed video and audio quality on the fly. |
 | [mpv-reload](https://github.com/4e6/mpv-reload)                                 | Automatically reloads slow or stuck video streams.           |
 | [mpv-ytsub](https://github.com/Idlusen/mpv-ytsub)                               | Loads YouTube automatic captions.                            |
