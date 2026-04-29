@@ -1,80 +1,152 @@
---[[
-    script to cycle commands with a keybind, accomplished through script messages
-    available at: https://github.com/CogentRedTester/mpv-scripts
+-- cycle-commands.lua
+--
+-- Cycle through arbitrary mpv input commands from input.conf.
+--
+-- Basic syntax:
+--   script-message cycle-commands "command 1" "command 2" "command 3"
+--
+-- Reverse:
+--   script-message cycle-commands !reverse "command 1" "command 2"
+--   script-message cycle-commands/reverse "command 1" "command 2"
+--
+-- Show raw command on OSD before running it:
+--   script-message cycle-commands/osd "command 1" "command 2"
+--
+-- Recommended: put your own show-text inside each command instead of using /osd:
+--   script-message cycle-commands `apply-profile pip; show-text "PiP: on"` `apply-profile pip-off; show-text "PiP: off"`
+--
+-- Notes:
+--   - Each cycle step must be one quoted argument.
+--   - If the command itself contains quotes, use backticks as the outer quotes.
+--   - Backtick/single-quote quoting requires mpv 0.34+.
+--   - Forward/reverse bindings share state as long as the command list is exactly identical.
 
-    syntax:
-        script-message cycle-commands "command1 args" "command2 args" "command3 args"
+local mp = require("mp")
+local msg = require("mp.msg")
+local utils = require("mp.utils")
 
-    The syntax of each command is identical to the standard input.conf syntax, but each command must be
-    a quoted string. Note that this may require you to nest (and potentially escape) quotes for the arguments.
-    Read the mpv documentation for how to do this: https://mpv.io/manual/master/#flat-command-syntax.
+local positions = {}
 
-    Semicolons also work exactly like they do normally, so you can easily send multiple commands each cycle.
-
-    Here are some examples of the same command using different quotes:
-        script-message cycle-commands "show-text one 1000 ; print-text two" "show-text \"three four\""
-        script-message cycle-commands 'show-text one 1000 ; print-text two' 'show-text "three four"'
-        script-message cycle-commands ``show-text one 1000 ; print-text two`` ``show-text "three four"``
-
-    This would, on keypress one, print 'one' to the OSD for 1 second and 'two' to the console,
-    and on keypress two 'three four' would be printed to the OSD.
-    Note that single (') and backtick (`) quoting was only added in mpv v0.34.
-
-    There are no limits to the number of commands, and the script message can be used as often as one wants.
-    The script stores the current iteration position for each unique set of command strings,
-    so there should be no overlap unless one binds the exact same set of strings (including spacing).
-
-    If the first command is `!reverse`, then the commands are cycled in the opposite direction.
-    If every subsequent command string is identical to a non-reversed cycle, then they share
-    their iteration position, making it possible to 'seek' forwards or backwards in the cycle:
-        script-message cycle-commands 'apply-profile profile1' 'apply-profile profile2' 'apply-profile profile3'
-        script-message cycle-commands !reverse 'apply-profile profile1' 'apply-profile profile2' 'apply-profile profile3'
-
-    Most commands should print messages to the OSD automatically, this can be controlled
-    by adding input prefixes to the commands: https://mpv.io/manual/master/#input-command-prefixes.
-    Some commands will not print an osd message even when told to, in this case you have two options:
-    you can add a show-text command to the cycle, or you can use the cycle-commands/osd script message
-    which will print the command string to the osd. For example:
-        script-message cycle-commands 'apply-profile profile1;show-text "applying profile1"' 'apply-profile profile2;show-text "applying profile2"'
-        script-message cycle-commands/osd 'apply-profile profile1' 'apply-profile profile2'
-
-    Any osd messages printed by the command will override the message sent by cycle-commands/osd.
-]]--
-
-local mp = require 'mp'
-local msg = require 'mp.msg'
-
---keeps track of the current position for a specific cycle
-local iterators = {}
-
---main function to identify and run the cycles
-local function main(osd, ...)
-    local commands = {...}
-
-    local reverse = commands[1] == '!reverse'
-    if reverse then table.remove(commands, 1) end
-
-    --to identify the specific cycle we'll concatenate all the strings together to use as our table key
-    local str = ("%d> %s"):format(#commands, table.concat(commands, '|'))
-    msg.trace('recieved:', str)
-
-    -- we'll initialise the iterator at 0 (an invalid position) to support forward or backwards iteration
-    if iterators[str] == nil then
-        msg.debug('unknown cycle, creating iterator')
-        iterators[str] = 0
+local function stable_key(commands)
+    local ok, json = pcall(utils.format_json, commands)
+    if ok and type(json) == "string" then
+        return json
     end
 
-    iterators[str] = iterators[str] + (reverse and -1 or 1)
-    if iterators[str] > #commands then iterators[str] = 1 end
-    if iterators[str] < 1 then iterators[str] = #commands end
-
-    --mp.command should run the commands exactly as if they were entered in input.conf.
-    --This should provide universal support for all input.conf command syntax
-    local cmd = commands[ iterators[str] ]
-    msg.verbose('sending command:', cmd)
-    if osd then mp.osd_message(cmd) end
-    mp.command(cmd)
+    -- Fallback: length-prefixed key, avoids collisions from simple concatenation.
+    local parts = { tostring(#commands) }
+    for _, command in ipairs(commands) do
+        parts[#parts + 1] = "\0"
+        parts[#parts + 1] = tostring(#command)
+        parts[#parts + 1] = ":"
+        parts[#parts + 1] = command
+    end
+    return table.concat(parts)
 end
 
-mp.register_script_message('cycle-commands', function(...) main(false, ...) end)
-mp.register_script_message('cycle-commands/osd', function(...) main(true, ...) end)
+local function parse_flags(args, default_reverse)
+    local reverse = default_reverse or false
+    local reset = false
+
+    while #args > 0 do
+        local flag = args[1]
+
+        if flag == "!reverse" or flag == "--reverse" then
+            reverse = not reverse
+            table.remove(args, 1)
+        elseif flag == "!reset" or flag == "--reset" then
+            reset = true
+            table.remove(args, 1)
+        else
+            break
+        end
+    end
+
+    return reverse, reset
+end
+
+local function validate_commands(commands)
+    if #commands == 0 then
+        msg.warn("No commands supplied.")
+        mp.osd_message("cycle-commands: no commands supplied", 3)
+        return false
+    end
+
+    for i, command in ipairs(commands) do
+        if type(command) ~= "string" or command == "" then
+            msg.error(("Invalid empty command at position %d."):format(i))
+            mp.osd_message(("cycle-commands: empty command #%d"):format(i), 3)
+            return false
+        end
+    end
+
+    return true
+end
+
+local function run_cycle(opts, ...)
+    opts = opts or {}
+
+    local commands = { ... }
+    local reverse, reset = parse_flags(commands, opts.reverse)
+
+    if not validate_commands(commands) then
+        return
+    end
+
+    local key = stable_key(commands)
+
+    local pos
+    if reset then
+        pos = 0
+    else
+        pos = positions[key] or 0
+    end
+
+    pos = pos + (reverse and -1 or 1)
+
+    if pos > #commands then
+        pos = 1
+    elseif pos < 1 then
+        pos = #commands
+    end
+
+    positions[key] = pos
+
+    local command = commands[pos]
+
+    msg.verbose(
+        ("cycle-commands: %d/%d%s: %s"):format(
+            pos,
+            #commands,
+            reverse and " reverse" or "",
+            command
+        )
+    )
+
+    if opts.osd then
+        mp.osd_message(command, 2)
+    end
+
+    local ok, err = pcall(mp.command, command)
+    if not ok then
+        local text = ("cycle-commands failed:\n%s"):format(tostring(err))
+        msg.error(text)
+        mp.osd_message(text, 4)
+    end
+end
+
+mp.register_script_message("cycle-commands", function(...)
+    run_cycle({ osd = false, reverse = false }, ...)
+end)
+
+mp.register_script_message("cycle-commands/osd", function(...)
+    run_cycle({ osd = true, reverse = false }, ...)
+end)
+
+mp.register_script_message("cycle-commands/reverse", function(...)
+    run_cycle({ osd = false, reverse = true }, ...)
+end)
+
+mp.register_script_message("cycle-commands/osd-reverse", function(...)
+    run_cycle({ osd = true, reverse = true }, ...)
+end)
