@@ -38,71 +38,55 @@
 --
 -- Clear all remembered cycle positions:
 --   script-message cycle-commands/clear
---
--- Notes:
---   - Each cycle step must be one quoted argument.
---   - If the command itself contains quotes, use backticks or single quotes as the outer quotes.
---   - Backtick/single-quote quoting requires mpv 0.34+.
---   - Forward/reverse/raw-OSD/post-OSD bindings share state as long as the command list is exactly identical.
---   - /osd shows the raw command before execution.
---   - --osd-text and --osd-prop show after successful execution.
 
 local mp = require("mp")
 local msg = require("mp.msg")
-local utils = require("mp.utils")
+
+local concat = table.concat
+local fmt = string.format
+local s_find = string.find
+local s_match = string.match
+local s_sub = string.sub
+local pcall = pcall
+local tonumber = tonumber
+local tostring = tostring
+local type = type
+local huge = math.huge
+
+local DEFAULT_OSD_DURATION = 2
+local PARSE_ERROR_OSD_DURATION = 3
+local COMMAND_ERROR_OSD_DURATION = 4
+local UNAVAILABLE = "<unavailable>"
 
 local positions = {}
+local versions = {}
+local state_serial = 0
+
+local function next_serial()
+    state_serial = state_serial + 1
+    return state_serial
+end
+
+local function is_blank(s)
+    return type(s) ~= "string" or s_find(s, "%S") == nil
+end
 
 local function trim(s)
-    return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+    return s_match(s, "^%s*(.-)%s*$")
 end
 
-local function stable_key(commands)
-    local ok, json = pcall(utils.format_json, commands)
-    if ok and type(json) == "string" then
-        return json
-    end
-
-    -- Fallback: length-prefixed key, avoids collisions from simple concatenation.
-    local parts = { tostring(#commands) }
-    for _, command in ipairs(commands) do
-        parts[#parts + 1] = "\0"
-        parts[#parts + 1] = tostring(#command)
-        parts[#parts + 1] = ":"
-        parts[#parts + 1] = command
-    end
-    return table.concat(parts)
+local function osd_prefixed(text, duration)
+    mp.osd_message("cycle-commands: " .. text, duration)
 end
 
-local function fail_parse(text)
-    msg.error(text)
-    mp.osd_message("cycle-commands: " .. text, 3)
+local function parse_error(text)
+    msg.error("cycle-commands: " .. text)
+    osd_prefixed(text, PARSE_ERROR_OSD_DURATION)
     return nil, text
 end
 
-local function value_after_equals(flag, option)
-    local prefix = option .. "="
-    if type(flag) == "string" and flag:sub(1, #prefix) == prefix then
-        return flag:sub(#prefix + 1)
-    end
-    return nil
-end
-
-local function take_value(args, flag)
-    table.remove(args, 1)
-
-    if #args == 0 then
-        return nil, "missing value for " .. flag
-    end
-
-    local value = args[1]
-    table.remove(args, 1)
-
-    return value
-end
-
 local function set_post_text(opts, text)
-    if type(text) ~= "string" or not text:find("%S") then
+    if is_blank(text) then
         return false, "empty --osd-text"
     end
 
@@ -115,19 +99,19 @@ local function set_post_text(opts, text)
 end
 
 local function set_post_prop(opts, spec)
-    if type(spec) ~= "string" or not spec:find("%S") then
+    if is_blank(spec) then
         return false, "empty --osd-prop"
     end
 
-    local prop, label = spec:match("^([^:]+):(.*)$")
-    if not prop then
-        prop = spec
-    end
+    local colon = s_find(spec, ":", 1, true)
+    local prop
+    local label
 
-    prop = trim(prop)
-
-    if label ~= nil then
-        label = trim(label)
+    if colon then
+        prop = trim(s_sub(spec, 1, colon - 1))
+        label = trim(s_sub(spec, colon + 1))
+    else
+        prop = trim(spec)
     end
 
     if prop == "" then
@@ -146,7 +130,7 @@ end
 local function set_osd_duration(opts, value)
     local duration = tonumber(value)
 
-    if not duration or duration <= 0 then
+    if not duration or duration ~= duration or duration <= 0 or duration >= huge then
         return false, "invalid --osd-duration: " .. tostring(value)
     end
 
@@ -154,132 +138,209 @@ local function set_osd_duration(opts, value)
     return true
 end
 
-local function parse_flags(args, defaults)
+local FLAG_NO_VALUE = {
+    ["!reverse"] = function(opts)
+        opts.reverse = not opts.reverse
+    end,
+
+    ["--reverse"] = function(opts)
+        opts.reverse = true
+    end,
+
+    ["--forward"] = function(opts)
+        opts.reverse = false
+    end,
+
+    ["--no-reverse"] = function(opts)
+        opts.reverse = false
+    end,
+
+    ["!reset"] = function(opts)
+        opts.reset = true
+    end,
+
+    ["--reset"] = function(opts)
+        opts.reset = true
+    end,
+
+    ["--raw-osd"] = function(opts)
+        opts.raw_osd = true
+    end,
+
+    ["--command-osd"] = function(opts)
+        opts.raw_osd = true
+    end,
+
+    ["--osd"] = function(opts)
+        opts.raw_osd = true
+    end,
+
+    ["--no-raw-osd"] = function(opts)
+        opts.raw_osd = false
+    end,
+
+    ["--no-osd"] = function(opts)
+        opts.raw_osd = false
+        opts.post_osd = nil
+    end,
+}
+
+local FLAG_WITH_VALUE = {
+    ["--osd-text"] = set_post_text,
+    ["--show-text"] = set_post_text,
+    ["--osd-prop"] = set_post_prop,
+    ["--show-prop"] = set_post_prop,
+    ["--osd-duration"] = set_osd_duration,
+}
+
+local function split_equals_flag(flag)
+    local eq = s_find(flag, "=", 1, true)
+
+    if not eq then
+        return nil
+    end
+
+    return s_sub(flag, 1, eq - 1), s_sub(flag, eq + 1)
+end
+
+local function parse_flags(argv, argc, defaults)
     defaults = defaults or {}
 
     local opts = {
-        reverse = defaults.reverse or false,
-        raw_osd = defaults.raw_osd or false,
-        reset = false,
-        post_osd = nil,
-        osd_duration = defaults.osd_duration or 2,
+        reverse = defaults.reverse == true,
+        raw_osd = defaults.raw_osd == true,
+        reset = defaults.reset == true,
+        post_osd = defaults.post_osd,
+        osd_duration = defaults.osd_duration or DEFAULT_OSD_DURATION,
     }
 
-    while #args > 0 do
-        local flag = args[1]
+    local i = 1
 
-        local osd_text_value = value_after_equals(flag, "--osd-text")
-        if osd_text_value == nil then
-            osd_text_value = value_after_equals(flag, "--show-text")
+    while i <= argc do
+        local flag = argv[i]
+
+        if type(flag) ~= "string" then
+            break
         end
-
-        local osd_prop_value = value_after_equals(flag, "--osd-prop")
-        if osd_prop_value == nil then
-            osd_prop_value = value_after_equals(flag, "--show-prop")
-        end
-
-        local osd_duration_value = value_after_equals(flag, "--osd-duration")
 
         if flag == "--" then
-            table.remove(args, 1)
-            break
-        elseif flag == "!reverse" then
-            opts.reverse = not opts.reverse
-            table.remove(args, 1)
-        elseif flag == "--reverse" then
-            opts.reverse = true
-            table.remove(args, 1)
-        elseif flag == "--forward" or flag == "--no-reverse" then
-            opts.reverse = false
-            table.remove(args, 1)
-        elseif flag == "!reset" or flag == "--reset" then
-            opts.reset = true
-            table.remove(args, 1)
-        elseif flag == "--raw-osd" or flag == "--command-osd" or flag == "--osd" then
-            opts.raw_osd = true
-            table.remove(args, 1)
-        elseif flag == "--no-raw-osd" then
-            opts.raw_osd = false
-            table.remove(args, 1)
-        elseif flag == "--no-osd" then
-            opts.raw_osd = false
-            opts.post_osd = nil
-            table.remove(args, 1)
-        elseif flag == "--osd-text" or flag == "--show-text" then
-            local value, err = take_value(args, flag)
-            if value == nil then
-                return fail_parse(err)
-            end
+            return opts, i + 1
+        end
 
-            local ok, set_err = set_post_text(opts, value)
-            if not ok then
-                return fail_parse(set_err)
-            end
-        elseif osd_text_value ~= nil then
-            local ok, set_err = set_post_text(opts, osd_text_value)
-            if not ok then
-                return fail_parse(set_err)
-            end
+        local handler = FLAG_NO_VALUE[flag]
 
-            table.remove(args, 1)
-        elseif flag == "--osd-prop" or flag == "--show-prop" then
-            local value, err = take_value(args, flag)
-            if value == nil then
-                return fail_parse(err)
-            end
-
-            local ok, set_err = set_post_prop(opts, value)
-            if not ok then
-                return fail_parse(set_err)
-            end
-        elseif osd_prop_value ~= nil then
-            local ok, set_err = set_post_prop(opts, osd_prop_value)
-            if not ok then
-                return fail_parse(set_err)
-            end
-
-            table.remove(args, 1)
-        elseif flag == "--osd-duration" then
-            local value, err = take_value(args, flag)
-            if value == nil then
-                return fail_parse(err)
-            end
-
-            local ok, set_err = set_osd_duration(opts, value)
-            if not ok then
-                return fail_parse(set_err)
-            end
-        elseif osd_duration_value ~= nil then
-            local ok, set_err = set_osd_duration(opts, osd_duration_value)
-            if not ok then
-                return fail_parse(set_err)
-            end
-
-            table.remove(args, 1)
+        if handler then
+            handler(opts)
+            i = i + 1
         else
-            break
+            handler = FLAG_WITH_VALUE[flag]
+
+            if handler then
+                if i >= argc then
+                    return parse_error("missing value for " .. flag)
+                end
+
+                local ok, err = handler(opts, argv[i + 1])
+
+                if not ok then
+                    return parse_error(err)
+                end
+
+                i = i + 2
+            else
+                local option, value = split_equals_flag(flag)
+                handler = option and FLAG_WITH_VALUE[option]
+
+                if not handler then
+                    break
+                end
+
+                local ok, err = handler(opts, value)
+
+                if not ok then
+                    return parse_error(err)
+                end
+
+                i = i + 1
+            end
         end
     end
 
-    return opts
+    return opts, i
 end
 
-local function validate_commands(commands)
-    if #commands == 0 then
-        msg.warn("No commands supplied.")
-        mp.osd_message("cycle-commands: no commands supplied", 3)
+local function validate_commands(argv, first, last)
+    if first > last then
+        msg.warn("cycle-commands: no commands supplied")
+        osd_prefixed("no commands supplied", PARSE_ERROR_OSD_DURATION)
         return false
     end
 
-    for i, command in ipairs(commands) do
-        if type(command) ~= "string" or not command:find("%S") then
-            msg.error(("Invalid empty command at position %d."):format(i))
-            mp.osd_message(("cycle-commands: empty command #%d"):format(i), 3)
+    for i = first, last do
+        if is_blank(argv[i]) then
+            local n = i - first + 1
+            msg.error(fmt("cycle-commands: invalid empty command at position %d", n))
+            osd_prefixed(fmt("empty command #%d", n), PARSE_ERROR_OSD_DURATION)
             return false
         end
     end
 
     return true
+end
+
+local function stable_key(argv, first, last)
+    -- Length-prefixed-ish key.
+    -- Deterministic and avoids practical collisions from naive concatenation.
+    local count = last - first + 1
+    local parts = { tostring(count) }
+    local n = 1
+
+    for i = first, last do
+        local command = argv[i]
+
+        n = n + 1
+        parts[n] = tostring(#command)
+
+        n = n + 1
+        parts[n] = command
+    end
+
+    return concat(parts, "\0")
+end
+
+local function advance_position(old_pos, count, reverse, reset)
+    local pos = reset and 0 or old_pos
+
+    if type(pos) ~= "number" or pos < 1 or pos > count then
+        pos = 0
+    end
+
+    if reverse then
+        return pos <= 1 and count or pos - 1
+    end
+
+    return pos >= count and 1 or pos + 1
+end
+
+local function remember_position(key, pos)
+    positions[key] = pos
+
+    local token = next_serial()
+    versions[key] = token
+
+    return token
+end
+
+local function restore_position(key, old_pos, old_version, token)
+    -- Only restore if this invocation still owns the current state.
+    -- This prevents a failed outer invocation from overwriting a newer nested
+    -- successful invocation or a state clear.
+    if versions[key] ~= token then
+        return
+    end
+
+    positions[key] = old_pos
+    versions[key] = old_version
 end
 
 local function run_mpv_command(command)
@@ -311,111 +372,92 @@ local function expand_text(template)
 end
 
 local function show_post_osd(opts)
-    if not opts.post_osd then
+    local post_osd = opts.post_osd
+
+    if not post_osd then
         return
     end
 
-    if opts.post_osd.kind == "text" then
-        local text, err = expand_text(opts.post_osd.text)
+    if post_osd.kind == "text" then
+        local text, err = expand_text(post_osd.text)
 
-        if not text then
-            msg.warn("Could not expand --osd-text: " .. tostring(err))
-            text = opts.post_osd.text
+        if text == nil then
+            msg.warn("cycle-commands: could not expand --osd-text: " .. tostring(err))
+            text = post_osd.text
         end
 
         mp.osd_message(text, opts.osd_duration)
         return
     end
 
-    if opts.post_osd.kind == "prop" then
-        local ok, value = pcall(mp.get_property_osd, opts.post_osd.prop)
+    if post_osd.kind == "prop" then
+        local ok, value = pcall(mp.get_property_osd, post_osd.prop, UNAVAILABLE)
 
         if not ok then
-            msg.warn(
-                ("Could not query property %q: %s"):format(
-                    opts.post_osd.prop,
-                    tostring(value)
-                )
-            )
-            value = "<unavailable>"
+            msg.warn(fmt(
+                "cycle-commands: could not query property %q: %s",
+                post_osd.prop,
+                tostring(value)
+            ))
+
+            value = UNAVAILABLE
         elseif value == nil then
-            value = "<unavailable>"
+            value = UNAVAILABLE
         end
 
         mp.osd_message(
-            ("%s: %s"):format(opts.post_osd.label, value),
+            fmt("%s: %s", post_osd.label, tostring(value)),
             opts.osd_duration
         )
     end
 end
 
-local function restore_position(key, old_pos)
-    if old_pos == nil then
-        positions[key] = nil
-    else
-        positions[key] = old_pos
-    end
-end
-
 local function run_cycle(defaults, ...)
-    defaults = defaults or {}
+    local argc = select("#", ...)
+    local argv = { ... }
 
-    local commands = { ... }
-    local opts = parse_flags(commands, defaults)
+    local opts, first_command = parse_flags(argv, argc, defaults)
 
     if not opts then
         return
     end
 
-    if not validate_commands(commands) then
+    if not validate_commands(argv, first_command, argc) then
         return
     end
 
-    local key = stable_key(commands)
+    local command_count = argc - first_command + 1
+    local key = stable_key(argv, first_command, argc)
+
     local old_pos = positions[key]
+    local old_version = versions[key]
 
-    local pos
-    if opts.reset then
-        pos = 0
-    else
-        pos = old_pos or 0
-    end
+    local pos = advance_position(old_pos, command_count, opts.reverse, opts.reset)
+    local token = remember_position(key, pos)
 
-    pos = pos + (opts.reverse and -1 or 1)
+    local command = argv[first_command + pos - 1]
 
-    if pos > #commands then
-        pos = 1
-    elseif pos < 1 then
-        pos = #commands
-    end
-
-    -- Store before running to behave sensibly if a command recursively invokes
-    -- this script. On failure, restore below.
-    positions[key] = pos
-
-    local command = commands[pos]
-
-    msg.verbose(
-        ("cycle-commands: %d/%d%s%s: %s"):format(
-            pos,
-            #commands,
-            opts.reverse and " reverse" or "",
-            opts.reset and " reset" or "",
-            command
-        )
-    )
+    msg.verbose(fmt(
+        "cycle-commands: %d/%d%s%s: %s",
+        pos,
+        command_count,
+        opts.reverse and " reverse" or "",
+        opts.reset and " reset" or "",
+        command
+    ))
 
     if opts.raw_osd then
         mp.osd_message(command, opts.osd_duration)
     end
 
     local ok, err = run_mpv_command(command)
-    if not ok then
-        restore_position(key, old_pos)
 
-        local text = ("cycle-commands failed:\n%s"):format(tostring(err))
+    if not ok then
+        restore_position(key, old_pos, old_version, token)
+
+        local text = fmt("cycle-commands failed:\n%s", tostring(err))
         msg.error(text)
-        mp.osd_message(text, 4)
+        mp.osd_message(text, COMMAND_ERROR_OSD_DURATION)
         return
     end
 
@@ -424,24 +466,38 @@ end
 
 local function clear_state()
     positions = {}
+    versions = {}
+
+    -- Do not reset state_serial. Keeping it monotonic prevents stale restore
+    -- tokens from becoming valid again after state is cleared.
     msg.info("cycle-commands: state cleared")
-    mp.osd_message("cycle-commands: state cleared", 2)
+    osd_prefixed("state cleared", DEFAULT_OSD_DURATION)
 end
 
-mp.register_script_message("cycle-commands", function(...)
-    run_cycle({ raw_osd = false, reverse = false }, ...)
-end)
+local function register_cycle_message(name, defaults)
+    mp.register_script_message(name, function(...)
+        run_cycle(defaults, ...)
+    end)
+end
 
-mp.register_script_message("cycle-commands/osd", function(...)
-    run_cycle({ raw_osd = true, reverse = false }, ...)
-end)
+register_cycle_message("cycle-commands", {
+    raw_osd = false,
+    reverse = false,
+})
 
-mp.register_script_message("cycle-commands/reverse", function(...)
-    run_cycle({ raw_osd = false, reverse = true }, ...)
-end)
+register_cycle_message("cycle-commands/osd", {
+    raw_osd = true,
+    reverse = false,
+})
 
-mp.register_script_message("cycle-commands/osd-reverse", function(...)
-    run_cycle({ raw_osd = true, reverse = true }, ...)
-end)
+register_cycle_message("cycle-commands/reverse", {
+    raw_osd = false,
+    reverse = true,
+})
+
+register_cycle_message("cycle-commands/osd-reverse", {
+    raw_osd = true,
+    reverse = true,
+})
 
 mp.register_script_message("cycle-commands/clear", clear_state)

@@ -467,7 +467,7 @@ input.conf
 
 # Included Shaders
 
-- [ACNet](https://github.com/TianZerL/ACNetGLSL)
+- [ACNet (Anime4kCPP)](https://github.com/TianZerL/ACNetGLSL)
 - [Ani4Kv2 and AniSD](https://github.com/Sirosky/Upscale-Hub)
 - [ArtCNN](https://github.com/Artoriuz/ArtCNN)
 - [Anime4K](https://github.com/bloc97/Anime4K/tree/master/glsl)
