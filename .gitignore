@@ -7,3 +7,5 @@ updater.bat
 portable_config/memo-history.jsonl
 portable_config/cache
 portable_config/watch_later
+settings.xml
+yt-dlp.exe
