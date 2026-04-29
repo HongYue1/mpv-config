@@ -16,8 +16,8 @@
 local options = require "mp.options"
 
 local opts = {
-    -- How far to jump on press. Set to 0 to disable tap-seeking and make
-    -- the key behave as pure hold-to-fast-forward.
+    -- How far to jump on press.
+    -- Set to 0 to disable tap-seeking and use pure hold-to-fast-forward.
     seek_distance = 5,
 
     -- Playback speed modifier, applied once every speed_interval until cap.
@@ -35,7 +35,10 @@ local opts = {
     subs_speed_cap = "1.6",
 
     -- Exponential speed ramping.
-    -- Example: speed_increase=0.05, speed_decrease=0.025
+    -- Example:
+    --   multiply_modifier=yes
+    --   speed_increase=0.05
+    --   speed_decrease=0.025
     multiply_modifier = false,
 
     -- Show current speed during normal hold fast-forward.
@@ -64,7 +67,7 @@ local opts = {
 
 options.read_options(opts, "evafast")
 
-local VERSION = "2.2.0"
+local VERSION = "2.3.0"
 local EPS = 0.0001
 local INF = math.huge
 
@@ -116,6 +119,26 @@ local function normalize_number(value, fallback, min_value)
     return n
 end
 
+local function normalize_positive_number(value, fallback)
+    local n = tonumber(value)
+
+    if not valid_number(n) or n <= 0 then
+        return fallback
+    end
+
+    return n
+end
+
+local function normalize_speed_cap(value, fallback)
+    local n = tonumber(value)
+
+    if not valid_number(n) or n <= 1 + EPS then
+        return fallback
+    end
+
+    return n
+end
+
 local function normalize_optional_number(value)
     if value == nil or value == false then
         return nil
@@ -139,10 +162,18 @@ local function normalize_optional_number(value)
 end
 
 opts.seek_distance = normalize_number(opts.seek_distance, 5, 0)
-opts.speed_increase = normalize_number(opts.speed_increase, 0.1, 0)
-opts.speed_decrease = normalize_number(opts.speed_decrease, 0.1, 0)
-opts.speed_interval = normalize_number(opts.speed_interval, 0.05, 0.001)
-opts.speed_cap = normalize_number(opts.speed_cap, 2, 1)
+
+-- These must be strictly positive. A value of 0 can leave ramping stuck.
+opts.speed_increase = normalize_positive_number(opts.speed_increase, 0.1)
+opts.speed_decrease = normalize_positive_number(opts.speed_decrease, 0.1)
+
+-- 0.01 is already 100 updates per second, which is smoother than needed.
+opts.speed_interval = normalize_number(opts.speed_interval, 0.05, 0.01)
+
+-- A cap of exactly 1 makes fast-forward impossible and can leave the script
+-- polling forever, so treat it as invalid.
+opts.speed_cap = normalize_speed_cap(opts.speed_cap, 2)
+
 opts.subs_speed_cap = normalize_optional_number(opts.subs_speed_cap)
 opts.speed_osd_interval = normalize_number(opts.speed_osd_interval, 0.10, 0)
 opts.lookahead_cache_interval = normalize_number(opts.lookahead_cache_interval, 0.15, 0)
@@ -326,6 +357,10 @@ local function ramp_media_distance(from_speed, to_speed)
 end
 
 local function seconds_to_next_subtitle()
+    if not opts.subs_speed_cap then
+        return nil
+    end
+
     local old_delay = mp.get_property_number("sub-delay", 0) or 0
     local old_visibility = mp.get_property_native("sub-visibility")
 
@@ -423,6 +458,14 @@ local function effective_speed_cap(speed)
             return cap
         end
 
+        -- If the target is closer than one timer tick of playback, do not
+        -- accelerate. This prevents speedup-target from overshooting tiny
+        -- remaining distances.
+        if remaining <= max(speed, 1) * opts.speed_interval + EPS then
+            state.target_braking = true
+            return 1
+        end
+
         if state.target_braking then
             return 1
         end
@@ -494,11 +537,7 @@ local function timer_needed_at(speed)
         return speed > 1 + EPS
     end
 
-    if state.target_time then
-        return true
-    end
-
-    if state.accelerating or state.toggle then
+    if state.accelerating or state.toggle or state.target_time then
         return true
     end
 
@@ -576,6 +615,11 @@ local function start_speedup(mode)
         state.target_braking = false
         state.display_mode = "target"
     else
+        -- A normal held key should always be temporary and should override
+        -- stale toggle/target state.
+        state.toggle = false
+        state.target_time = nil
+        state.target_braking = false
         state.display_mode = "normal"
     end
 
@@ -654,10 +698,14 @@ local function evafast(keypress)
     local event = keypress and keypress.event
 
     if almost_equal(opts.seek_distance, 0) then
-        if event == "down" or event == "repeat" or event == "press" then
+        if event == "down" or event == "repeat" then
             state.repeated = true
             start_speedup("normal")
         elseif event == "up" then
+            start_slowdown()
+        elseif event == "press" then
+            -- Complex repeatable bindings should normally give down/repeat/up.
+            -- If mpv gives only press, avoid sticky fast-forward.
             start_slowdown()
         end
 
@@ -724,13 +772,13 @@ local function hard_reset()
         owns_speed
         or state.accelerating
         or state.toggle
-        or state.target_time
+        or state.target_time ~= nil
         or state.repeated
 
     reset_state_at_normal_speed()
 
     if should_reset_speed then
-        mp.set_property_number("speed", 1)
+        pcall(mp.set_property_number, "speed", 1)
     end
 
     owns_speed = false

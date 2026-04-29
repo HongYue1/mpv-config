@@ -12,8 +12,7 @@ local utils = require "mp.utils"
 local options = require "mp.options"
 
 local o = {
-    -- Base command path. Empty = temp directory.
-    -- This is no longer a raw mpv IPC socket; it is an internal command-file base.
+    -- Internal command-file base path. Empty = temp directory.
     socket = "",
 
     -- Thumbnail base path. Empty = temp directory.
@@ -22,10 +21,10 @@ local o = {
     max_height = 200,
     max_width = 200,
 
-    -- Requires mpv overlay scaling support.
+    -- Display scale factor for overlay-add.
     scale_factor = 1,
 
-    -- auto, no, clip, linear, gamma, reinhard, hable, mobius
+    -- auto, no, none, clip, linear, gamma, reinhard, hable, mobius
     tone_mapping = "auto",
 
     overlay_id = 42,
@@ -37,13 +36,12 @@ local o = {
     audio = false,
     hwdec = false,
 
-    -- Kept for config compatibility. Ignored by this rewrite.
+    -- Kept for config compatibility. Ignored.
     direct_io = false,
 
     mpv_path = "mpv",
 
     -- Internal tuning.
-    -- These may be overridden in thumbfast.conf.
     file_check_interval = 1 / 30,
     seek_interval = 0.05,
     exact_seek_delay = 0.25,
@@ -60,13 +58,59 @@ local is_windows = platform:find("windows", 1, true) ~= nil or package.config:su
 local is_macos = platform:find("darwin", 1, true) ~= nil or platform:find("mac", 1, true) ~= nil
 local sep = is_windows and "\\" or "/"
 
+local function normalize_bool(v)
+    if type(v) == "boolean" then return v end
+    if type(v) == "number" then return v ~= 0 end
+
+    v = tostring(v or ""):lower()
+    return v == "yes" or v == "true" or v == "1" or v == "on"
+end
+
 local function path_join(a, b)
     if not a or a == "" then return b end
-    if a:sub(-1) == "/" or a:sub(-1) == "\\" then
-        return a .. b
-    end
+    if a:sub(-1) == "/" or a:sub(-1) == "\\" then return a .. b end
     return a .. sep .. b
 end
+
+local function clamp_number(v, fallback, min_v, integer)
+    v = tonumber(v)
+    if v == nil then v = fallback end
+    if integer then v = math.floor(v) end
+    if min_v and v < min_v then v = min_v end
+    return v
+end
+
+local function round(v)
+    return math.floor((tonumber(v) or 0) + 0.5)
+end
+
+local function sanitize_time(v)
+    v = tonumber(v)
+    if not v or v ~= v then return nil end
+    if v < 0 then return 0 end
+    return v
+end
+
+o.max_width = clamp_number(o.max_width, 200, 1, true)
+o.max_height = clamp_number(o.max_height, 200, 1, true)
+o.scale_factor = clamp_number(o.scale_factor, 1, 0.001, false)
+
+o.overlay_id = clamp_number(o.overlay_id, 42, 0, true)
+
+o.file_check_interval = clamp_number(o.file_check_interval, 1 / 30, 0.001)
+o.seek_interval = clamp_number(o.seek_interval, 0.05, 0.001)
+o.child_poll_interval = clamp_number(o.child_poll_interval, 1 / 60, 0.001)
+
+o.exact_seek_delay = tonumber(o.exact_seek_delay)
+if o.exact_seek_delay == nil then o.exact_seek_delay = 0.25 end
+
+o.quit_after_inactivity = tonumber(o.quit_after_inactivity) or 0
+o.tone_mapping = tostring(o.tone_mapping or "auto"):lower()
+
+o.spawn_first = normalize_bool(o.spawn_first)
+o.network = normalize_bool(o.network)
+o.audio = normalize_bool(o.audio)
+o.hwdec = normalize_bool(o.hwdec)
 
 local tmpdir =
     os.getenv("TMPDIR") or
@@ -74,31 +118,20 @@ local tmpdir =
     os.getenv("TMP") or
     (is_windows and "." or "/tmp")
 
-local pid = tostring(utils.getpid() or math.floor(mp.get_time() * 1000000))
+local pid = tostring((utils.getpid and utils.getpid()) or math.floor(mp.get_time() * 1000000))
+local instance = pid .. "." .. tostring(math.floor(mp.get_time() * 1000000))
 
 if o.socket == "" then
-    o.socket = path_join(tmpdir, "thumbfast-" .. pid)
+    o.socket = path_join(tmpdir, "thumbfast-" .. instance)
 else
-    o.socket = o.socket .. pid
+    o.socket = o.socket .. instance
 end
 
 if o.thumbnail == "" then
-    o.thumbnail = path_join(tmpdir, "thumbfast.out." .. pid)
+    o.thumbnail = path_join(tmpdir, "thumbfast.out." .. instance)
 else
-    o.thumbnail = o.thumbnail .. pid
+    o.thumbnail = o.thumbnail .. instance
 end
-
-o.max_width = math.max(1, tonumber(o.max_width) or 200)
-o.max_height = math.max(1, tonumber(o.max_height) or 200)
-o.scale_factor = math.max(1, math.floor(tonumber(o.scale_factor) or 1))
-
-o.file_check_interval = math.max(0.001, tonumber(o.file_check_interval) or (1 / 30))
-o.seek_interval = math.max(0.001, tonumber(o.seek_interval) or 0.05)
-o.exact_seek_delay = tonumber(o.exact_seek_delay)
-if o.exact_seek_delay == nil then
-    o.exact_seek_delay = 0.25
-end
-o.child_poll_interval = math.max(0.001, tonumber(o.child_poll_interval) or (1 / 60))
 
 local thumbnail_bgra = o.thumbnail .. ".bgra"
 
@@ -113,14 +146,6 @@ local disabled = true
 local dirty = false
 local dirty_timer
 
-local function mark_dirty()
-    dirty = true
-
-    if dirty_timer and not dirty_timer:is_enabled() then
-        dirty_timer:resume()
-    end
-end
-
 local effective_w = o.max_width
 local effective_h = o.max_height
 local real_w, real_h
@@ -129,7 +154,9 @@ local last_real_w, last_real_h
 local x, y
 local last_x, last_y
 local script_name
+local last_script_name
 local show_thumbnail = false
+local overlay_visible = false
 
 local has_vid = 0
 local last_has_vid = 0
@@ -140,7 +167,7 @@ local pending_seek = false
 
 local last_rotate = 0
 local last_vf_reset = ""
-local last_vf_runtime = ""
+local last_full_vf = ""
 local last_par = ""
 local last_crop = nil
 local last_tone_mapping = nil
@@ -151,14 +178,17 @@ local generation = 0
 local current = nil
 local children = {}
 
+local seek_timer
+local exact_seek_timer
+local file_timer
+local activity_timer
+
+local file_poll_until = 0
+local last_info_json = nil
+
 local filters_reset = {
     ["lavfi-crop"] = true,
     ["crop"] = true,
-}
-
-local filters_runtime = {
-    ["hflip"] = true,
-    ["vflip"] = true,
 }
 
 local filters_all = {
@@ -179,26 +209,45 @@ local tone_mappings = {
 }
 
 local function command_async(cmd)
-    mp.command_native_async(cmd, noop)
+    local ok, err = pcall(mp.command_native_async, cmd, noop)
+    if not ok then
+        msg.verbose("async command failed: " .. tostring(err))
+    end
+end
+
+local function show_error(text)
+    pcall(mp.commandv, "show-text", text, 5000)
 end
 
 local function subprocess_async(args, callback)
-    local ok, ret = pcall(mp.command_native_async, {
+    local wrapped = noop
+
+    if callback then
+        wrapped = function(...)
+            local ok, err = pcall(callback, ...)
+            if not ok then
+                msg.error("subprocess callback failed: " .. tostring(err))
+            end
+        end
+    end
+
+    local ok, handle = pcall(mp.command_native_async, {
         name = "subprocess",
         playback_only = true,
         args = args,
-    }, callback or noop)
+    }, wrapped)
 
     if not ok then
-        msg.error("failed to start subprocess: " .. tostring(ret))
+        msg.error("failed to start subprocess: " .. tostring(handle))
         return nil
     end
 
-    return ret
+    return handle
 end
 
 local function atomic_write(path, data)
     local tmp = path .. ".tmp"
+    data = tostring(data or "")
 
     local f, err = io.open(tmp, "wb")
     if not f then
@@ -206,115 +255,168 @@ local function atomic_write(path, data)
         return false
     end
 
-    f:write(data)
-    f:close()
+    local ok_write, write_err = f:write(data)
+    local ok_close, close_err = f:close()
+
+    if not ok_write or not ok_close then
+        msg.warn("cannot write temporary command file: " .. tostring(write_err or close_err))
+        os.remove(tmp)
+        return false
+    end
 
     if is_windows then
         os.remove(path)
     end
 
-    local ok, rename_err = os.rename(tmp, path)
-    if ok then
-        return true
-    end
+    local ok_rename, rename_err = os.rename(tmp, path)
+    if ok_rename then return true end
 
-    -- Fallback for filesystems where rename-over-existing is awkward.
-    local wf, write_err = io.open(path, "wb")
+    -- Conservative fallback.
+    local wf, open_err = io.open(path, "wb")
     if not wf then
-        msg.warn("cannot write command file: " .. tostring(rename_err or write_err))
+        msg.warn("cannot write command file: " .. tostring(rename_err or open_err))
         os.remove(tmp)
         return false
     end
 
-    wf:write(data)
-    wf:close()
+    local ok_fallback_write, fallback_write_err = wf:write(data)
+    local ok_fallback_close, fallback_close_err = wf:close()
     os.remove(tmp)
+
+    if not ok_fallback_write or not ok_fallback_close then
+        msg.warn("cannot write command file: " .. tostring(fallback_write_err or fallback_close_err))
+        return false
+    end
+
     return true
 end
 
 local function move_file(from, to)
-    if is_windows then
-        os.remove(to)
-    end
+    if is_windows then os.remove(to) end
     return os.rename(from, to)
+end
+
+local function mark_dirty()
+    dirty = true
+    if dirty_timer and not dirty_timer:is_enabled() then
+        dirty_timer:resume()
+    end
 end
 
 local function vo_tone_mapping()
     local passes = mp.get_property_native("vo-passes")
     if not passes or not passes.fresh then return nil end
 
-    for _, pass in pairs(passes.fresh) do
-        for k, v in pairs(pass) do
-            if k == "desc" and v then
-                local tm = tostring(v):match("([0-9a-zA-Z._-]+) tone map")
-                if tm then return tm end
-            end
+    for _, pass in ipairs(passes.fresh) do
+        if type(pass) == "table" and pass.desc then
+            local tm = tostring(pass.desc):match("([0-9a-zA-Z._-]+) tone map")
+            if tm then return tm end
         end
     end
 
     return nil
 end
 
-local function vf_string(filters, full)
-    local vf = ""
+local function vf_escape(v)
+    return tostring(v)
+        :gsub("\\", "\\\\")
+        :gsub(":", "\\:")
+        :gsub(",", "\\,")
+end
 
-    local crop = properties["video-crop"] or ""
-    if crop ~= "" then
-        vf = "lavfi-crop=" ..
-            crop:gsub("(%d*)x?(%d*)%+(%d+)%+(%d+)", "w=%1:h=%2:x=%3:y=%4") ..
-            ","
+local function resolve_tone_mapping()
+    if o.tone_mapping == "no" then return nil end
 
-        local params = properties["video-out-params"]
-        local width = params and params.dw
-        local height = params and params.dh
+    local tm = o.tone_mapping
 
-        if width and height then
-            vf = vf:gsub("w=:h=:", "w=" .. width .. ":h=" .. height .. ":")
+    if tm == "auto" then
+        tm = last_tone_mapping or properties["tone-mapping"]
+
+        if tm == "auto" and properties["current-vo"] == "gpu-next" then
+            tm = vo_tone_mapping()
         end
     end
+
+    if not tone_mappings[tm] then
+        tm = "hable"
+    end
+
+    last_tone_mapping = tm
+    return tm
+end
+
+local function append_filter_params(vf, filter)
+    local params = filter.params or {}
+    local keys = {}
+
+    for key in pairs(params) do
+        keys[#keys + 1] = key
+    end
+
+    table.sort(keys, function(a, b)
+        return tostring(a) < tostring(b)
+    end)
+
+    if #keys == 0 then
+        return vf .. tostring(filter.name) .. ","
+    end
+
+    local args = {}
+    for _, key in ipairs(keys) do
+        args[#args + 1] = vf_escape(key) .. "=" .. vf_escape(params[key])
+    end
+
+    return vf .. tostring(filter.name) .. "=" .. table.concat(args, ":") .. ","
+end
+
+local function crop_vf()
+    local crop = properties["video-crop"] or ""
+    if crop == "" then return "" end
+
+    local cw, ch, cx, cy = tostring(crop):match("^(%d*)x?(%d*)%+(%-?%d+)%+(%-?%d+)$")
+    if not cx or not cy then return "" end
+
+    if cw == "" or ch == "" then
+        local params = properties["video-out-params"]
+        if params then
+            if cw == "" and params.dw then cw = tostring(params.dw) end
+            if ch == "" and params.dh then ch = tostring(params.dh) end
+        end
+    end
+
+    if cw == "" or ch == "" then return "" end
+
+    return "lavfi-crop=w=" .. cw .. ":h=" .. ch .. ":x=" .. cx .. ":y=" .. cy .. ","
+end
+
+local function vf_string(filters, full)
+    local vf = crop_vf()
 
     local vf_table = properties.vf
     if vf_table and #vf_table > 0 then
         for i = #vf_table, 1, -1 do
             local filter = vf_table[i]
-            if filter and filters[filter.name] then
-                local args = ""
-                local params = filter.params or {}
-
-                for key, value in pairs(params) do
-                    if args ~= "" then args = args .. ":" end
-                    args = args .. tostring(key) .. "=" .. tostring(value)
-                end
-
-                vf = vf .. tostring(filter.name) .. "=" .. args .. ","
+            if filter and filter.name and filters[filter.name] then
+                vf = append_filter_params(vf, filter)
             end
         end
     end
 
-    if (full and o.tone_mapping ~= "no") or o.tone_mapping == "auto" then
+    if full and o.tone_mapping ~= "no" then
         local vp = properties["video-params"]
-        if vp and vp.primaries == "bt.2020" then
-            local tm = o.tone_mapping
+        local is_bt2020 = vp and vp.primaries == "bt.2020"
+        local sig_peak = vp and tonumber(vp["sig-peak"])
+        local looks_hdr = is_bt2020 or (sig_peak and sig_peak > 1)
 
-            if tm == "auto" then
-                tm = last_tone_mapping or properties["tone-mapping"]
-
-                if tm == "auto" and properties["current-vo"] == "gpu-next" then
-                    tm = vo_tone_mapping()
-                end
+        if looks_hdr then
+            local tm = resolve_tone_mapping()
+            if tm then
+                vf = vf ..
+                    "zscale=transfer=linear," ..
+                    "format=gbrpf32le," ..
+                    "tonemap=" .. tm .. "," ..
+                    "zscale=transfer=bt709,"
             end
-
-            if not tone_mappings[tm] then
-                tm = "hable"
-            end
-
-            last_tone_mapping = tm
-
-            vf = vf ..
-                "zscale=transfer=linear," ..
-                "format=gbrpf32le," ..
-                "tonemap=" .. tm .. "," ..
-                "zscale=transfer=bt709,"
         end
     end
 
@@ -338,13 +440,17 @@ local function calc_dimensions()
     end
 
     local hidpi = tonumber(properties["display-hidpi-scale"]) or 1
+    if hidpi <= 0 then hidpi = 1 end
 
-    if width / height > o.max_width / o.max_height then
-        effective_w = math.floor(o.max_width * hidpi + 0.5)
-        effective_h = math.floor(height / width * effective_w + 0.5)
+    local max_w = o.max_width * hidpi
+    local max_h = o.max_height * hidpi
+
+    if width / height > max_w / max_h then
+        effective_w = round(max_w)
+        effective_h = round(height / width * effective_w)
     else
-        effective_h = math.floor(o.max_height * hidpi + 0.5)
-        effective_w = math.floor(width / height * effective_h + 0.5)
+        effective_h = round(max_h)
+        effective_w = round(width / height * effective_h)
     end
 
     local vpar = params.par or 1
@@ -370,22 +476,26 @@ local function video_available()
     return has_vid ~= 0 or selected_video_track() ~= nil or properties["video-out-params"] ~= nil
 end
 
-local function publish_info(w, h)
+local function compute_disabled(w, h)
     local track = selected_video_track()
-    local image = track and track.image
-    local albumart = image and track.albumart
+    local image = track and track.image == true
+    local albumart = track and track.albumart == true
 
-    disabled =
+    return
         (w or 0) <= 0 or
         (h or 0) <= 0 or
         not video_available() or
         (properties["demuxer-via-network"] and not o.network) or
         (albumart and not o.audio) or
         (image and not albumart)
+end
+
+local function publish_info(w, h, force)
+    disabled = compute_disabled(w, h)
 
     local json = utils.format_json({
-        width = (w or 0) * o.scale_factor,
-        height = (h or 0) * o.scale_factor,
+        width = round((w or 0) * o.scale_factor),
+        height = round((h or 0) * o.scale_factor),
         scale_factor = o.scale_factor,
         disabled = disabled,
         available = true,
@@ -394,16 +504,22 @@ local function publish_info(w, h)
         overlay_id = o.overlay_id,
     })
 
-    command_async({ "script-message", "thumbfast-info", json })
+    if force or json ~= last_info_json then
+        last_info_json = json
+        command_async({ "script-message", "thumbfast-info", json })
+    end
 end
 
 local function make_child_script(command_file, token)
+    local poll = string.format("%.6f", o.child_poll_interval)
+
     return
         "local utils = require 'mp.utils'\n" ..
         "local command_file = " .. string.format("%q", command_file) .. "\n" ..
         "local token = " .. string.format("%q", token) .. "\n" ..
         "local last_seq = -1\n" ..
         "local last_raw = nil\n" ..
+
         "local function read_all(path)\n" ..
         "    local f = io.open(path, 'rb')\n" ..
         "    if not f then return nil end\n" ..
@@ -411,26 +527,28 @@ local function make_child_script(command_file, token)
         "    f:close()\n" ..
         "    return s\n" ..
         "end\n" ..
+
         "local function apply(cmd)\n" ..
         "    if type(cmd) ~= 'table' then return end\n" ..
         "    if cmd.token ~= token then return end\n" ..
-        "    if type(cmd.seq) ~= 'number' or cmd.seq == last_seq then return end\n" ..
+        "    if type(cmd.seq) ~= 'number' or cmd.seq <= last_seq then return end\n" ..
         "    last_seq = cmd.seq\n" ..
+
         "    if cmd.cmd == 'seek' then\n" ..
         "        local mode = cmd.fast and 'absolute+keyframes' or 'absolute+exact'\n" ..
         "        mp.command_native_async({'seek', tonumber(cmd.time) or 0, mode}, function() end)\n" ..
         "    elseif cmd.cmd == 'set' and cmd.property then\n" ..
         "        pcall(mp.set_property_native, cmd.property, cmd.value)\n" ..
         "    elseif cmd.cmd == 'vf' then\n" ..
-        "        mp.commandv('vf', 'set', cmd.value or '')\n" ..
+        "        mp.command_native_async({'vf', 'set', cmd.value or ''}, function() end)\n" ..
         "    elseif cmd.cmd == 'quit' then\n" ..
         "        mp.commandv('quit')\n" ..
         "    end\n" ..
         "end\n" ..
-        "mp.add_periodic_timer(" .. tostring(o.child_poll_interval) .. ", function()\n" ..
+
+        "mp.add_periodic_timer(" .. poll .. ", function()\n" ..
         "    local s = read_all(command_file)\n" ..
-        "    if not s or s == '' then return end\n" ..
-        "    if s == last_raw then return end\n" ..
+        "    if not s or s == '' or s == last_raw then return end\n" ..
         "    last_raw = s\n" ..
         "    local ok, cmd = pcall(utils.parse_json, s)\n" ..
         "    if ok then pcall(apply, cmd) end\n" ..
@@ -444,8 +562,15 @@ local function write_child_script(proc)
         return false
     end
 
-    f:write(make_child_script(proc.command_file, proc.token))
-    f:close()
+    local ok_write, write_err = f:write(make_child_script(proc.command_file, proc.token))
+    local ok_close, close_err = f:close()
+
+    if not ok_write or not ok_close then
+        msg.error("cannot write child script: " .. tostring(write_err or close_err))
+        os.remove(proc.script)
+        return false
+    end
+
     return true
 end
 
@@ -461,6 +586,18 @@ local function cleanup_proc(proc)
     children[proc.generation] = nil
 end
 
+local function cleanup_all_children()
+    local list = {}
+
+    for _, proc in pairs(children) do
+        list[#list + 1] = proc
+    end
+
+    for _, proc in ipairs(list) do
+        cleanup_proc(proc)
+    end
+end
+
 local function write_command(proc, cmd)
     if not proc then return false end
 
@@ -474,10 +611,38 @@ local function write_command(proc, cmd)
     return atomic_write(proc.command_file, json)
 end
 
-local activity_timer
+local function terminate_proc(proc, hard)
+    if not proc then return end
+
+    proc.quitting = true
+
+    if not proc.quit_sent then
+        proc.quit_sent = true
+        write_command(proc, { cmd = "quit" })
+    end
+
+    if hard and proc.async_handle then
+        pcall(mp.abort_async_command, proc.async_handle)
+    end
+end
+
+local function stop_current(hard)
+    if current then
+        local proc = current
+        current = nil
+        terminate_proc(proc, hard)
+    end
+end
+
+local function stop_all_children(hard)
+    for _, proc in pairs(children) do
+        terminate_proc(proc, hard)
+    end
+    current = nil
+end
 
 local function bump_activity()
-    if o.quit_after_inactivity <= 0 or not current then
+    if o.quit_after_inactivity <= 0 or not current or not activity_timer then
         return
     end
 
@@ -488,16 +653,17 @@ local function bump_activity()
     activity_timer:resume()
 end
 
-local function stop_child()
-    if current then
-        current.quitting = true
-        write_command(current, { cmd = "quit" })
-        current = nil
+local function arm_file_poll(seconds)
+    seconds = tonumber(seconds) or 2
+    file_poll_until = math.max(file_poll_until, mp.get_time() + seconds)
+
+    if file_timer and not file_timer:is_enabled() then
+        file_timer:resume()
     end
 end
 
 local function spawn(time)
-    if disabled then return false end
+    if disabled or current then return false end
 
     local path = properties.path
     if not path or path == "" then return false end
@@ -509,7 +675,8 @@ local function spawn(time)
 
     generation = generation + 1
 
-    local start_time = tonumber(time) or 0
+    local start_time = sanitize_time(time) or 0
+    local full_vf = vf_string(filters_all, true)
 
     local proc = {
         generation = generation,
@@ -519,7 +686,9 @@ local function spawn(time)
         output = o.thumbnail .. ".raw." .. tostring(generation),
         seq = 0,
         quitting = false,
+        quit_sent = false,
         start_time = start_time,
+        full_vf = full_vf,
     }
 
     if not write_child_script(proc) then
@@ -528,20 +697,24 @@ local function spawn(time)
     end
 
     os.remove(proc.output)
+    os.remove(proc.output .. ".tmp")
 
     local vid = properties.vid
     if vid == false or vid == "no" or vid == nil then
         vid = "auto"
     end
 
-    local rotate = properties["video-rotate"] or last_rotate or 0
+    local rotate = tonumber(properties["video-rotate"]) or last_rotate or 0
 
     local args = {
         mpv_path,
 
         "--no-config",
+        "--no-resume-playback",
         "--really-quiet",
+        "--msg-level=all=no",
         "--no-terminal",
+        "--force-window=no",
 
         "--idle=yes",
         "--pause=yes",
@@ -551,9 +724,12 @@ local function spawn(time)
         "--scripts=" .. proc.script,
 
         "--osc=no",
+        "--osd-level=0",
         "--ytdl=no",
         "--no-sub",
         "--no-audio",
+        "--audio-file-auto=no",
+        "--sub-auto=no",
 
         "--edition=" .. tostring(properties.edition or "auto"),
         "--vid=" .. tostring(vid),
@@ -571,7 +747,7 @@ local function spawn(time)
         "--vd-lavc-threads=2",
         "--hwdec=" .. (o.hwdec and "auto" or "no"),
 
-        "--vf=" .. vf_string(filters_all, true),
+        "--vf=" .. full_vf,
         "--sws-scaler=fast-bilinear",
         "--sws-allow-zimg=no",
 
@@ -584,24 +760,25 @@ local function spawn(time)
     }
 
     if mp.get_property_native("media-controls") ~= nil then
-        table.insert(args, "--media-controls=no")
+        args[#args + 1] = "--media-controls=no"
     end
 
     if is_macos and properties["macos-app-activation-policy"] then
-        table.insert(args, "--macos-app-activation-policy=accessory")
+        args[#args + 1] = "--macos-app-activation-policy=accessory"
     end
 
-    table.insert(args, "--")
-    table.insert(args, path)
+    args[#args + 1] = "--"
+    args[#args + 1] = path
 
     current = proc
     children[proc.generation] = proc
 
-    local ret = subprocess_async(args, function(success, result)
+    local handle = subprocess_async(args, function(success, result)
         local status = result and result.status
 
         if current and current.generation == proc.generation then
             current = nil
+            publish_info(real_w or effective_w, real_h or effective_h)
         end
 
         cleanup_proc(proc)
@@ -609,48 +786,42 @@ local function spawn(time)
         if success == false or (status and status ~= 0 and status ~= -2) then
             if not proc.quitting then
                 msg.error("thumbnail mpv subprocess failed")
-                mp.commandv("show-text", "thumbfast: thumbnail subprocess failed", 5000)
+                show_error("thumbfast: thumbnail subprocess failed")
             end
         end
     end)
 
-    if not ret then
+    if not handle then
         if current and current.generation == proc.generation then
             current = nil
         end
+
         cleanup_proc(proc)
-        mp.commandv("show-text", "thumbfast: cannot create mpv subprocess", 5000)
+        show_error("thumbfast: cannot create mpv subprocess")
         return false
     end
+
+    proc.async_handle = handle
+    last_full_vf = full_vf
 
     bump_activity()
     publish_info(real_w or effective_w, real_h or effective_h)
     return true
 end
 
-local seek_timer
-local exact_seek_timer
-local file_timer
-local file_poll_until = 0
-
-local function arm_file_poll(seconds)
-    seconds = tonumber(seconds) or 2
-
-    file_poll_until = math.max(file_poll_until, mp.get_time() + seconds)
-
-    if file_timer and not file_timer:is_enabled() then
-        file_timer:resume()
-    end
-end
-
 local function send_seek(fast)
-    if current and last_seek_time ~= nil then
-        write_command(current, {
-            cmd = "seek",
-            time = last_seek_time,
-            fast = fast and true or false,
-        })
-    end
+    if not current or last_seek_time == nil then return end
+
+    local t = sanitize_time(last_seek_time)
+    if t == nil then return end
+
+    last_seek_time = t
+
+    write_command(current, {
+        cmd = "seek",
+        time = t,
+        fast = fast and true or false,
+    })
 end
 
 seek_timer = mp.add_timeout(o.seek_interval, function()
@@ -684,16 +855,16 @@ local function request_seek()
         last_seek_time ~= nil and
         math.abs(last_seek_time - current.start_time) < 0.001
 
-    arm_file_poll((allow_fast_seek and o.exact_seek_delay >= 0 and o.exact_seek_delay or 0) + 2)
+    local refinement_delay =
+        allow_fast_seek and o.exact_seek_delay >= 0 and o.exact_seek_delay or 0
+
+    arm_file_poll(refinement_delay + 2)
 
     if same_as_spawn then
         if allow_fast_seek and o.exact_seek_delay >= 0 then
-            if exact_seek_timer:is_enabled() then
-                exact_seek_timer:kill()
-            end
+            if exact_seek_timer:is_enabled() then exact_seek_timer:kill() end
             exact_seek_timer:resume()
         end
-
         return
     end
 
@@ -706,47 +877,60 @@ local function request_seek()
     end
 
     if allow_fast_seek and o.exact_seek_delay >= 0 then
-        if exact_seek_timer:is_enabled() then
-            exact_seek_timer:kill()
-        end
+        if exact_seek_timer:is_enabled() then exact_seek_timer:kill() end
         exact_seek_timer:resume()
     end
 end
 
 local function real_res(req_w, req_h, filesize)
-    local count = filesize / 4
-    local diff = req_w * req_h - count
+    if not filesize or filesize <= 0 or filesize % 4 ~= 0 then
+        return nil
+    end
 
-    local rotate = properties["video-params"] and properties["video-params"].rotate or 0
+    local count = filesize / 4
+
+    -- Only account for container/display rotation reported by video-params.
+    -- Manual video-rotate is already reflected through video-out-params/filter output.
+    local rotate = tonumber(properties["video-params"] and properties["video-params"].rotate) or 0
+
     if rotate % 180 == 90 then
         req_w, req_h = req_h, req_w
     end
 
-    if diff == 0 then
+    if req_w * req_h == count then
         return req_w, req_h
     end
 
     local threshold = 5
     local long_side, short_side = req_w, req_h
+    local swapped = false
 
     if req_h > req_w then
         long_side, short_side = req_h, req_w
+        swapped = true
     end
 
-    for a = short_side, short_side - threshold, -1 do
-        if a > 0 and count % a == 0 then
+    for a = short_side, math.max(1, short_side - threshold), -1 do
+        if count % a == 0 then
             local b = count / a
-            if long_side - b < threshold then
-                if req_h < req_w then
-                    return b, a
-                else
+            if math.abs(long_side - b) <= threshold then
+                if swapped then
                     return a, b
+                else
+                    return b, a
                 end
             end
         end
     end
 
     return nil
+end
+
+local function remove_overlay()
+    if overlay_visible then
+        command_async({ "overlay-remove", o.overlay_id })
+        overlay_visible = false
+    end
 end
 
 local function draw(w, h, script)
@@ -767,12 +951,18 @@ local function draw(w, h, script)
         }
 
         if o.scale_factor ~= 1 then
-            table.insert(cmd, w * o.scale_factor)
-            table.insert(cmd, h * o.scale_factor)
+            cmd[#cmd + 1] = round(w * o.scale_factor)
+            cmd[#cmd + 1] = round(h * o.scale_factor)
         end
 
         command_async(cmd)
-    elseif script then
+        overlay_visible = true
+        return
+    end
+
+    remove_overlay()
+
+    if script and script ~= "" then
         local json = utils.format_json({
             width = w,
             height = h,
@@ -782,7 +972,7 @@ local function draw(w, h, script)
             overlay_id = o.overlay_id,
         })
 
-        mp.commandv("script-message-to", script, "thumbfast-render", json)
+        command_async({ "script-message-to", script, "thumbfast-render", json })
     end
 end
 
@@ -792,19 +982,19 @@ local function check_new_thumb()
 
     local tmp = proc.output .. ".tmp"
 
+    -- Move first, then inspect the moved file. This gives us a stable snapshot
+    -- and avoids racing against the worker while it is replacing proc.output.
     if not move_file(proc.output, tmp) then
         return false
     end
 
     local finfo = utils.file_info(tmp)
-    if not fino and false then end
-    if not finfo or not finfo.is_file or finfo.size <= 0 then
+    if not finfo or not finfo.is_file or finfo.size <= 0 or finfo.size % 4 ~= 0 then
         os.remove(tmp)
         return false
     end
 
     local w, h = real_res(effective_w, effective_h, finfo.size)
-
     if not w or not h then
         os.remove(tmp)
         return false
@@ -844,6 +1034,8 @@ end)
 file_timer:kill()
 
 local function clear(no_activity)
+    local silent = no_activity == true
+
     file_timer:kill()
     seek_timer:kill()
     exact_seek_timer:kill()
@@ -853,16 +1045,14 @@ local function clear(no_activity)
     last_seek_time = nil
 
     show_thumbnail = false
+    x, y = nil, nil
     last_x, last_y = nil, nil
-
-    local used_external_renderer = script_name ~= nil and x == nil
     script_name = nil
+    last_script_name = nil
 
-    if not used_external_renderer then
-        command_async({ "overlay-remove", o.overlay_id })
-    end
+    remove_overlay()
 
-    if not no_activity then
+    if not silent then
         bump_activity()
     end
 end
@@ -873,7 +1063,7 @@ activity_timer = mp.add_timeout(math.max(0.001, o.quit_after_inactivity), functi
         return
     end
 
-    stop_child()
+    stop_current(false)
     real_w, real_h = nil, nil
 end)
 activity_timer:kill()
@@ -881,28 +1071,33 @@ activity_timer:kill()
 local function thumb(time, r_x, r_y, script)
     if disabled then return end
 
-    time = tonumber(time)
+    time = sanitize_time(time)
     if not time then return end
 
     local nx = tonumber(r_x)
     local ny = tonumber(r_y)
 
     if nx and ny then
-        x = math.floor(nx + 0.5)
-        y = math.floor(ny + 0.5)
+        x = round(nx)
+        y = round(ny)
     else
         x, y = nil, nil
     end
 
-    script_name = script
+    script_name = script and script ~= "" and script or nil
 
-    if last_x ~= x or last_y ~= y or not show_thumbnail then
+    if last_x ~= x
+        or last_y ~= y
+        or last_script_name ~= script_name
+        or not show_thumbnail
+    then
         show_thumbnail = true
         last_x, last_y = x, y
-        draw(real_w, real_h, script)
+        last_script_name = script_name
+        draw(real_w, real_h, script_name)
     end
 
-    if time == last_seek_time then
+    if last_seek_time ~= nil and math.abs(time - last_seek_time) < 0.001 then
         bump_activity()
         return
     end
@@ -920,8 +1115,20 @@ end
 local function update_property_dirty(name, value)
     properties[name] = value
 
-    if name == "tone-mapping" then
+    if name == "tone-mapping" or name == "current-vo" then
         last_tone_mapping = nil
+    end
+
+    mark_dirty()
+end
+
+local function update_current_video(name, value)
+    properties[name] = value
+
+    if properties.vid == false or properties.vid == "no" then
+        has_vid = 0
+    else
+        has_vid = value and 1 or 0
     end
 
     mark_dirty()
@@ -941,6 +1148,10 @@ local function update_tracklist(_, value)
         end
     end
 
+    if properties.vid == false or properties.vid == "no" then
+        has_vid = 0
+    end
+
     mark_dirty()
 end
 
@@ -951,8 +1162,10 @@ local function sync_property_to_child(prop, val)
         if val == false or val == "no" then
             has_vid = 0
             last_has_vid = 0
-            publish_info(effective_w, effective_h)
-            clear()
+            publish_info(effective_w, effective_h, true)
+            clear(true)
+            stop_current(true)
+            mark_dirty()
             return
         else
             has_vid = 1
@@ -970,23 +1183,48 @@ local function sync_property_to_child(prop, val)
     mark_dirty()
 end
 
+local function remember_state(vf_reset, full_vf, rotate, crop)
+    last_vf_reset = vf_reset
+    last_full_vf = full_vf
+    last_rotate = rotate
+    last_par = par
+    last_crop = crop
+    last_has_vid = has_vid
+end
+
+local function disable_and_stop_if_needed()
+    if disabled then
+        clear(true)
+        stop_current(true)
+        real_w, real_h = nil, nil
+        last_real_w, last_real_h = nil, nil
+    end
+end
+
 local function watch_changes()
-    if not dirty or not properties["video-out-params"] then
+    if not dirty then return end
+    dirty = false
+
+    if not properties["video-out-params"] then
+        publish_info(0, 0)
+        disable_and_stop_if_needed()
         return
     end
 
-    dirty = false
-
     local old_w = effective_w
     local old_h = effective_h
+    local old_disabled = disabled
 
     if not calc_dimensions() then
         publish_info(0, 0)
+        disable_and_stop_if_needed()
         return
     end
 
     local vf_reset = vf_string(filters_reset, false)
-    local rotate = properties["video-rotate"] or 0
+    local full_vf = vf_string(filters_all, true)
+    local rotate = tonumber(properties["video-rotate"]) or 0
+    local crop = properties["video-crop"] or ""
 
     local resized =
         old_w ~= effective_w or
@@ -994,71 +1232,84 @@ local function watch_changes()
         last_vf_reset ~= vf_reset or
         last_rotate % 180 ~= rotate % 180 or
         par ~= last_par or
-        last_crop ~= properties["video-crop"]
+        last_crop ~= crop
+
+    publish_info(effective_w, effective_h)
+
+    if disabled then
+        clear(true)
+        stop_current(true)
+        remember_state(vf_reset, full_vf, rotate, crop)
+        return
+    end
 
     if resized then
-        publish_info(effective_w, effective_h)
-    elseif last_has_vid ~= has_vid and has_vid ~= 0 then
-        publish_info(effective_w, effective_h)
+        real_w, real_h = nil, nil
+        last_real_w, last_real_h = nil, nil
     end
 
     if current then
         if resized then
-            local seek_time = last_seek_time or mp.get_property_number("time-pos", 0)
+            local old_seek_time = last_seek_time
+            local seek_time = old_seek_time or sanitize_time(mp.get_property_number("time-pos", 0)) or 0
 
             local was_showing = show_thumbnail
             local old_x, old_y = x, y
             local old_script_name = script_name
 
-            stop_child()
+            stop_current(true)
             clear(true)
 
             show_thumbnail = was_showing
+            last_seek_time = old_seek_time
+
             if was_showing then
                 x, y = old_x, old_y
                 script_name = old_script_name
                 last_x, last_y = old_x, old_y
+                last_script_name = old_script_name
             end
 
-            real_w, real_h = nil, nil
-            last_real_w, last_real_h = nil, nil
-
-            spawn(seek_time)
-
-            if was_showing or o.spawn_first then
+            if spawn(seek_time) and (was_showing or o.spawn_first) then
                 arm_file_poll(2)
+
+                if old_seek_time and allow_fast_seek and o.exact_seek_delay >= 0 then
+                    if exact_seek_timer:is_enabled() then exact_seek_timer:kill() end
+                    exact_seek_timer:resume()
+                end
             end
         else
+            local changed = false
+
             if rotate ~= last_rotate then
                 write_command(current, {
                     cmd = "set",
                     property = "video-rotate",
                     value = rotate,
                 })
+                changed = true
             end
 
-            local vf_runtime = vf_string(filters_runtime, false)
-            if vf_runtime ~= last_vf_runtime then
+            if full_vf ~= last_full_vf then
                 write_command(current, {
                     cmd = "vf",
-                    value = vf_string(filters_all, true),
+                    value = full_vf,
                 })
+                changed = true
+            end
 
-                last_vf_runtime = vf_runtime
+            if changed then
+                last_seek_time = last_seek_time or sanitize_time(mp.get_property_number("time-pos", 0)) or 0
+                send_seek(false)
+                arm_file_poll(1)
             end
         end
-    else
-        last_vf_runtime = vf_string(filters_runtime, false)
     end
 
-    last_vf_reset = vf_reset
-    last_rotate = rotate
-    last_par = par
-    last_crop = properties["video-crop"]
-    last_has_vid = has_vid
+    remember_state(vf_reset, full_vf, rotate, crop)
 
-    if not current and not disabled and o.spawn_first and resized then
-        spawn(mp.get_property_number("time-pos", 0))
+    if not current and not disabled and o.spawn_first and (resized or old_disabled) then
+        spawn(sanitize_time(mp.get_property_number("time-pos", 0)) or 0)
         arm_file_poll(2)
     end
 end
@@ -1070,31 +1321,88 @@ local function remove_thumbnail_files()
     os.remove(o.thumbnail)
     os.remove(thumbnail_bgra)
     os.remove(o.thumbnail .. ".tmp")
+end
 
-    for _, proc in pairs(children) do
-        cleanup_proc(proc)
+local function refresh_cached_file_properties()
+    properties.path = mp.get_property_native("path")
+    properties["stream-open-filename"] = mp.get_property_native("stream-open-filename")
+    properties["demuxer-via-network"] = mp.get_property_native("demuxer-via-network")
+
+    properties["display-hidpi-scale"] = mp.get_property_native("display-hidpi-scale")
+    properties["video-out-params"] = mp.get_property_native("video-out-params")
+    properties["video-params"] = mp.get_property_native("video-params")
+    properties.vf = mp.get_property_native("vf")
+    properties["tone-mapping"] = mp.get_property_native("tone-mapping")
+    properties["current-vo"] = mp.get_property_native("current-vo")
+    properties["video-rotate"] = mp.get_property_native("video-rotate")
+    properties["video-crop"] = mp.get_property_native("video-crop")
+
+    properties["macos-app-activation-policy"] = mp.get_property_native("macos-app-activation-policy")
+    properties.vid = mp.get_property_native("vid")
+    properties.edition = mp.get_property_native("edition")
+
+    allow_fast_seek = (mp.get_property_number("duration", 30) or 30) >= 30
+
+    properties["current-tracks/video"] = nil
+    has_vid = 0
+
+    local tracks = mp.get_property_native("track-list")
+    if type(tracks) == "table" then
+        for _, track in ipairs(tracks) do
+            if track.type == "video" and track.selected then
+                properties["current-tracks/video"] = track
+                has_vid = 1
+                break
+            end
+        end
+    end
+
+    local current_video = mp.get_property_native("current-tracks/video")
+    if current_video ~= nil then
+        properties["current-tracks/video"] = current_video
+        has_vid = 1
+    end
+
+    if properties.vid == false or properties.vid == "no" then
+        has_vid = 0
     end
 end
 
 local function file_loaded()
-    stop_child()
+    stop_all_children(true)
     clear(true)
+
+    disabled = true
 
     real_w, real_h = nil, nil
     last_real_w, last_real_h = nil, nil
     last_tone_mapping = nil
     last_seek_time = nil
 
-    remove_thumbnail_files()
+    last_vf_reset = ""
+    last_full_vf = ""
+    last_par = ""
+    last_crop = nil
+    last_rotate = 0
+    last_has_vid = 0
 
-    calc_dimensions()
-    publish_info(effective_w, effective_h)
+    remove_thumbnail_files()
+    refresh_cached_file_properties()
+
+    if calc_dimensions() then
+        publish_info(effective_w, effective_h, true)
+    else
+        publish_info(0, 0, true)
+    end
 
     mark_dirty()
 end
 
 local function shutdown()
-    stop_child()
+    remove_overlay()
+    stop_all_children(true)
+    cleanup_all_children()
+
     remove_thumbnail_files()
 
     os.remove(o.socket)
@@ -1105,7 +1413,7 @@ local function on_duration(_, val)
     allow_fast_seek = (tonumber(val) or 30) >= 30
 end
 
-mp.observe_property("current-tracks/video", "native", update_property_dirty)
+mp.observe_property("current-tracks/video", "native", update_current_video)
 mp.observe_property("track-list", "native", update_tracklist)
 
 mp.observe_property("display-hidpi-scale", "native", update_property_dirty)
@@ -1114,10 +1422,10 @@ mp.observe_property("video-params", "native", update_property_dirty)
 mp.observe_property("vf", "native", update_property_dirty)
 mp.observe_property("tone-mapping", "native", update_property_dirty)
 
-mp.observe_property("demuxer-via-network", "native", update_property)
+mp.observe_property("demuxer-via-network", "native", update_property_dirty)
 mp.observe_property("stream-open-filename", "native", update_property)
 mp.observe_property("macos-app-activation-policy", "native", update_property)
-mp.observe_property("current-vo", "native", update_property)
+mp.observe_property("current-vo", "native", update_property_dirty)
 mp.observe_property("video-rotate", "native", update_property_dirty)
 mp.observe_property("video-crop", "native", update_property_dirty)
 mp.observe_property("path", "native", update_property)
