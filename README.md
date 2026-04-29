@@ -460,7 +460,7 @@ input.conf
 | [memo](https://github.com/po5/memo)                                             | Recent files/history menu with optional uosc integration.    | Refactored with GPT 5.5 High |
 | [quality-menu](https://github.com/natural-harmonia-gropius/mpv-quality-menu)    | Allows changing streamed video and audio quality on the fly. |
 | [mpv-reload](https://github.com/4e6/mpv-reload)                                 | Automatically reloads slow or stuck video streams.           |
-| [mpv-ytsub](https://github.com/Idlusen/mpv-ytsub)                               | Loads YouTube automatic captions.                            |
+| [mpv-ytsub](https://github.com/Idlusen/mpv-ytsub)                               | Loads YouTube automatic captions.                            | Refactored with GPT 5.5 High |
 | [mpv_sponsorblock_minimal](https://codeberg.org/jouni/mpv_sponsorblock_minimal) | Skips SponsorBlock segments.                                 |
 
 ---
