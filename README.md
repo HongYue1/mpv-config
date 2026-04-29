@@ -1,10 +1,20 @@
-# My Personal MPV Configuration
+# mpv-config
 
-A personal MPV setup with a customized UI, useful scripts, shader presets, YouTube playback support, and sensible defaults for high-quality playback.
+A personal mpv configuration focused on high-quality playback, streaming support, and a clean customizable interface — suitable for both local files and YouTube/web video.
 
 ![Screenshot 1](assets/screenshot_1.png)
-
 ![Screenshot 2](assets/screenshot_2.png)
+
+---
+
+## Highlights
+
+- **Automatic shader profiles** — shaders are applied based on source resolution without any manual switching. HD content, SD content, and 4K downscaling each get their own optimal pipeline.
+- **Vulkan renderer** — uses `gpu-next` with Vulkan for the best performance and quality on modern hardware.
+- **Streaming ready** — quality-menu for on-the-fly stream selection, SponsorBlock integration, YouTube subtitle support, and stream reload for stuck playback.
+- **Extensive shader library** — includes CuNNy, ArtCNN, FSRCNNX, NNEDI3, RAVU, Anime4K, ACNet/ARNet, and more, all accessible from the uosc menu. Every shader is documented inline in `input.conf`.
+- **Surround downmix** — 5.1 and 7.1 audio is automatically downmixed to stereo. Disable if you have a surround system.
+- **Cross-platform** — works on Windows, Linux, and macOS.
 
 ---
 
@@ -21,472 +31,235 @@ A personal MPV setup with a customized UI, useful scripts, shader presets, YouTu
 
 ---
 
-# Installation
+## Installation
 
-## Windows
+### Windows
 
-### 1. Download MPV
+#### 1. Download mpv
 
-Download the latest 64-bit Windows build of MPV from the Shinchiro builds page:
+Download the latest 64-bit Windows build from the Shinchiro builds page:
 
-[Download MPV for Windows](https://github.com/shinchiro/mpv-winbuild-cmake/releases)
-
-Choose one of the following:
+[Download mpv for Windows](https://github.com/shinchiro/mpv-winbuild-cmake/releases)
 
 - `mpv-x86_64-*.7z` — recommended for most systems
-- `mpv-x86_64-v3-*.7z` — recommended for newer CPUs
+- `mpv-x86_64-v3-*.7z` — for newer CPUs (Ryzen 5000+, Intel 12th gen+)
 
-Extract the archive somewhere permanent.  
-This folder will be your main MPV folder, so place it somewhere you will not move or delete later.
+Extract the archive somewhere permanent. This folder will be your main mpv folder — do not move it after installation.
 
----
+#### 2. Install File Associations
 
-### 2. Install MPV File Associations
+Inside the mpv folder, open the `installer` folder, right-click `mpv-install.bat`, and select **Run as administrator**.
 
-Inside the MPV folder, open the `installer` folder.
+After it finishes, Windows may prompt you to set mpv as the default media player in Control Panel.
 
-Right-click:
+#### 3. Install This Configuration
 
-```text
-mpv-install.bat
-```
+[Download this repository as a ZIP](https://github.com/HongYue1/mpv-config/archive/refs/heads/main.zip), extract it, and copy the `portable_config` folder into your mpv folder — next to `mpv.exe`.
 
-Then select:
+Your mpv folder should look like this:
 
-```text
-Run as administrator
-```
+![Folder structure](assets/screenshot_3.png)
 
-After installation finishes, Windows may prompt you to open Control Panel so you can set MPV as your default media player.
+#### 4. Update mpv / Install yt-dlp + ffmpeg
 
----
+Right-click `updater.bat` and select **Run as administrator**. The updater lets you update mpv and optionally install `yt-dlp` and `ffmpeg`, which enables streaming from YouTube and hundreds of other sites.
 
-### 3. Download This Configuration
-
-Download this repository:
-
-[Download MPV Config](https://github.com/HongYue1/mpv-config/archive/refs/heads/main.zip)
-
-Extract the archive, then copy the `portable_config` folder into your MPV folder.
-
-It should be placed next to:
-
-```text
-mpv.exe
-```
+[Supported sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
 
 ---
 
-### 4. Updating MPV or Downloading yt-dlp for Youtube playback support.
+### Linux / macOS
 
-To update MPV or to update/install `yt-dlp`, right-click:
+#### 1. Install mpv
 
-```text
-updater.bat
-```
-
-Then choose:
-
-```text
-Run as administrator
-```
-
-Follow the instructions in the updater.
-
-The updater also gives you the option to install `yt-dlp`, which allows MPV to stream videos from YouTube and many other supported websites.
-
-Supported sites list:
-
-[yt-dlp supported sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
-
-After the first run, the updater creates:
-
-```text
-settings.xml
-```
-
-This file stores your updater preferences so you do not have to choose them every time.
-
-To reset the updater choices, delete:
-
-```text
-settings.xml
-```
-
----
-
-### 5. Final Folder Structure
-
-After installation, your MPV folder should look similar to this:
-
-![Folder Screenshot](assets/screenshot_3.png)
-
----
-
-## Linux / macOS
-
-### 1. Install MPV
-
-Install MPV using your package manager.
-
-#### Ubuntu / Debian
+**Ubuntu / Debian**
 
 ```sh
 sudo apt install mpv
 ```
 
-#### Arch Linux
+**Arch Linux**
 
 ```sh
 sudo pacman -S mpv
-```
-
-Or, for the Git version:
-
-```sh
+# or for the git version:
 yay -S mpv-git
 ```
 
-#### macOS
+**macOS**
 
 ```sh
 brew install mpv
 ```
 
----
+#### 2. Option 1: Install the Configuration manually
 
-### 2. Install the Configuration Manually
+[Download this repository as a ZIP](https://github.com/HongYue1/mpv-config/archive/refs/heads/main.zip), extract it, and copy the contents of `portable_config` into `~/.config/mpv/` (create the folder if it doesn't exist).
 
-Download this repository:
-
-[Download MPV Config](https://github.com/HongYue1/mpv-config/archive/refs/heads/main.zip)
-
-Extract it, then copy the contents of:
-
-```text
-portable_config
-```
-
-Into:
-
-```text
-~/.config/mpv/
-```
-
-Create the folder if it does not already exist.
-
----
-
-### 3. Install with Git
-
-If you have `git` installed, you can install the configuration with one command:
+#### 3. Option 2: Install with Git instead
 
 ```sh
 git clone https://github.com/HongYue1/mpv-config.git && mkdir -p ~/.config/mpv && cp -r ./mpv-config/portable_config/. ~/.config/mpv/ && rm -rf mpv-config
 ```
 
-The configuration should now be installed.
-
 ---
 
-# Settings You May Want to Change
+## Settings You May Want to Change
 
-For official MPV option documentation, see:
+For full option documentation, see the [mpv manual](https://mpv.io/manual/master/) (use `Ctrl+F` to search).
 
-[MPV Manual](https://mpv.io/manual/master/)
+### GPU API and Hardware Decoding
 
-You can also search inside the manual with `Ctrl + F`.
+This config defaults to Vulkan. If your GPU doesn't support Vulkan or you have playback issues:
 
----
-
-## GPU API and Hardware Decoding
-
-By default, this configuration uses Vulkan.
-
-If your GPU does not support Vulkan, or if you experience playback issues, change these options.
-
-### GPU API
-
-In `mpv.conf`:
+**`mpv.conf`**
 
 ```conf
-gpu-api=vulkan
+gpu-api=vulkan      # change to: auto, d3d11, or opengl
+hwdec=vulkan        # change to: auto, auto-copy, or auto-safe
 ```
 
-You can change it to one of the following:
+### Default Shader for HD Content
 
-```conf
-gpu-api=auto
-gpu-api=d3d11
-gpu-api=opengl
-```
+The default shader for 720p–1080p content is CuNNy, which requires Vulkan and is tuned for anime:
 
----
-
-### Hardware Decoding
-
-In `mpv.conf`:
-
-```conf
-hwdec=vulkan
-```
-
-You can change it to:
-
-```conf
-hwdec=auto
-hwdec=auto-copy
-hwdec=auto-safe
-```
-
-Or choose another supported option from the MPV manual.
-
----
-
-### Default Shader for HD and FHD
-
-In `profiles.conf`, this shader requires Vulkan:
+**`profiles.conf`**
 
 ```conf
 glsl-shader="~~/shaders/CuNNy/ds/dp4a/CuNNy-4x16-DS-Q.glsl"
 ```
 
-> [!NOTE]
-> This Shader is for Anime content and requires Vulkan. If you are not using Vulkan or if you don't watch anime mainly and want to avoid having to change Shaders everytime, delete this line or replace it with another shader that suits you.
+> **Note:** If you primarily watch live-action content or aren't using Vulkan, delete or replace this line with a shader that suits your content.
 
----
+### Dither Depth
 
-## Audio Downmixing
+Set this to match your display's bit depth:
 
-By default, this configuration downmixes surround audio to stereo.
-
-That means:
-
-- 5.1 audio is downmixed to 2.0
-- 7.1 audio is downmixed to 2.0
-
-If you use a surround sound system and do not want downmixing, remove or edit the related profiles in `profiles.conf`.
-
-Look for these conditions:
+**`mpv.conf`**
 
 ```conf
-profile-cond=(p["audio-params/channel-count"] == 6)
+dither-depth=10   # change to 8 for 8-bit displays, or auto if using d3d11
 ```
 
-And:
+On Windows, check your display bit depth under **Settings → System → Display → Advanced display**.
 
-```conf
-profile-cond=(p["audio-params/channel-count"] == 8)
-```
+### YouTube Playback Quality
 
----
+Default is 1080p. Change the number to set a different cap:
 
-## ICC Color Profile
-
-If you have color or gamma issues, check this option in `mpv.conf`:
-
-```conf
-icc-profile-auto
-```
-
-This option is currently disabled by default because it can cause gamma issues on some systems.
-
-If you enable it and notice incorrect colors, disable or remove it again.
-
----
-
-## Video Output Range
-
-In `mpv.conf`:
-
-By default, video output range is set to full:
-
-```conf
-video-output-levels=full
-```
-
-If you are using a TV or display that expects limited range, change it to:
-
-```conf
-video-output-levels=limited
-```
-
-Or let MPV decide automatically:
-
-```conf
-video-output-levels=auto
-```
-
----
-
-## YouTube Playback Quality
-
-In `mpv.conf`:
-
-By default, YouTube playback uses 1080p or lower:
+**`mpv.conf`**
 
 ```conf
 ytdl-format=bestvideo[height<=?1080]+bestaudio/best[height<=?1080]
 ```
 
-To change the maximum resolution, replace `1080` with your preferred value.
+### Audio Downmixing
 
-For example, for 1440p:
+By default, 5.1 and 7.1 audio is downmixed to stereo. If you have a surround system, remove or comment out the `Downmix_Audio_5_1` and `Downmix_Audio_7_1` profiles in `profiles.conf`.
 
-```conf
-ytdl-format=bestvideo[height<=?1440]+bestaudio/best[height<=?1440]
-```
+### ICC Color Profile
 
----
+`icc-profile-auto` is disabled by default because it can cause gamma issues on some systems. Enable it in `mpv.conf` if you have a calibrated ICC profile and want mpv to use it.
 
-## Dither Depth
+### Video Output Range
 
-In `mpv.conf`:
-
-The default dither depth is set to 10-bit:
+**`mpv.conf`**
 
 ```conf
-dither-depth=10
+video-output-levels=full   # change to limited for TVs, or auto
 ```
 
-> [!IMPORTANT]
-> Set this to match your display bit depth.
+### Windows-Only Options
 
-On Windows, you can check this under:
-
-```text
-Settings > System > Display > Advanced display
-```
-
-If you use:
+Only enable these if you are on Windows with `gpu-api=d3d11`:
 
 ```conf
-gpu-api=d3d11
-```
-
-You can also set:
-
-```conf
+d3d11-exclusive-fs=yes
 dither-depth=auto
 ```
 
-> [!NOTE]
-> The on-the-wire bit depth usually cannot be detected unless you are using `gpu-api=d3d11`. Explicitly setting the value to your display's bit depth is recommended because dithering performed by some LCD panels can be low quality.
-
 ---
 
-## Default Shaders
+## Important Notes
 
-Default shaders for SD and HD+ content can be changed in:
+### First Launch May Be Slow
 
-```text
-profiles.conf
-```
+When launching mpv for the first time with this configuration, or when a shader is used for the first time, mpv may freeze for a few seconds while it compiles and caches the shader. This only happens once per shader — subsequent launches are fast.
 
----
+### Sluggish UI During Playback
 
-## Windows-Only Option
-
-In `mpv.conf`:
-Only enable this option if you are on windows and you use `gpu-api=d3d11`:
-
-```conf
-d3d11-exclusive-fs
-```
-
----
-
-# Important Notes
-
-## First Launch May Be Slow
-
-When launching MPV for the first time after installing this configuration, or when using a shader for the first time, MPV may hang for a few seconds.
-
-This happens because MPV is creating shader cache.
-
-It should only happen the first time. After the cache is created, playback should be faster unless the cache is deleted or a new shader is used.
-
----
-
-## Sluggish UI During Playback
-
-If the UI feels slow or sluggish during video playback, you can try adding this to `mpv.conf`:
+If the uosc interface feels slow during playback, add this to `mpv.conf`:
 
 ```conf
 video-sync=display-resample
 ```
 
-This may make the UI feel smoother, but it can slightly increase CPU/GPU usage.
+This slightly increases CPU/GPU usage but makes the UI feel more responsive. The root cause is that mpv ties UI rendering frequency to the video frame rate during playback — pausing the video will reveal the difference.
 
-### Why does this happen?
+### Toggle the UI
 
-`uosc` prioritizes performance, but during video playback, MPV ties UI rendering frequency to the video's frame rate.
+Press `Tab` to toggle uosc between always-visible and auto-hide mode.
 
-If you pause the video, the UI refresh rate may become closer to your monitor refresh rate, making it feel smoother.
+### Shaders
 
-This is mostly an MPV limitation.
-
----
-
-## Toggle the UI
-
-Press:
-
-```text
-Tab
-```
-
-To toggle the UI between hidden and always visible.
+The uosc right-click menu exposes the full shader library, grouped by type. All shader variants are documented inline in `input.conf`. To clear all active shaders: `Ctrl+Alt+C`. To show all active shaders: `Ctrl+Alt+S`.
 
 ---
 
-## Keybindings
+## Included Scripts
 
-To view or edit keybindings, open:
-
-```text
-input.conf
-```
-
----
-
-# Included Scripts
-
-| Script                                                                          | Description                                                  | Notes                        |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------ | ---------------------------- |
-| [uosc](https://github.com/darsain/uosc)                                         | Adds a minimalist and highly customizable GUI.               |
-| [evafast](https://github.com/po5/evafast)                                       | Fast-forwarding and seeking on a single key.                 | Refactored with GPT 5.5 High |
-| [thumbfast](https://github.com/po5/thumbfast)                                   | High-performance on-the-fly thumbnail generation.            | Refactored with GPT 5.5 High |
-| [memo](https://github.com/po5/memo)                                             | Recent files/history menu with optional uosc integration.    | Refactored with GPT 5.5 High |
-| [quality-menu](https://github.com/natural-harmonia-gropius/mpv-quality-menu)    | Allows changing streamed video and audio quality on the fly. |
-| [mpv-reload](https://github.com/4e6/mpv-reload)                                 | Automatically reloads slow or stuck video streams.           |
-| [mpv-ytsub](https://github.com/Idlusen/mpv-ytsub)                               | Loads YouTube automatic captions.                            | Refactored with GPT 5.5 High |
-| [mpv_sponsorblock_minimal](https://codeberg.org/jouni/mpv_sponsorblock_minimal) | Skips SponsorBlock segments.                                 |
+| Script                                                                          | Description                                           |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| [uosc](https://github.com/darsain/uosc)                                         | Minimalist, highly customizable GUI                   |
+| [evafast](https://github.com/po5/evafast)                                       | Hold-to-fast-forward with adaptive speed ramp         |
+| [thumbfast](https://github.com/po5/thumbfast)                                   | High-performance on-the-fly thumbnail generation      |
+| [memo](https://github.com/po5/memo)                                             | Recent files/history menu with uosc integration       |
+| [quality-menu](https://github.com/natural-harmonia-gropius/mpv-quality-menu)    | Change stream quality (video/audio format) on the fly |
+| [mpv-reload](https://github.com/4e6/mpv-reload)                                 | Reload stuck or slow streams automatically            |
+| [mpv-ytsub](https://github.com/Idlusen/mpv-ytsub)                               | Load YouTube auto-generated captions                  |
+| [mpv_sponsorblock_minimal](https://codeberg.org/jouni/mpv_sponsorblock_minimal) | Skip SponsorBlock-tagged segments                     |
 
 ---
 
-# Included Shaders
+## Included Shaders
 
-- [ACNet (Anime4kCPP)](https://github.com/TianZerL/ACNetGLSL)
-- [Ani4Kv2 and AniSD](https://github.com/Sirosky/Upscale-Hub)
-- [ArtCNN](https://github.com/Artoriuz/ArtCNN)
-- [Anime4K](https://github.com/bloc97/Anime4K/tree/master/glsl)
-- [AMD CAS, FSR and NVScaler](https://gist.github.com/agyild)
-- [CfL Prediction](https://github.com/Artoriuz/glsl-chroma-from-luma-prediction)
-- [CuNNy](https://github.com/funnyplanter/CuNNy)
-- [FSRCNNX](https://github.com/igv/FSRCNN-TensorFlow/releases)
-- [FSRCNNX Enhance](https://github.com/HelpSeeker/FSRCNN-TensorFlow/releases/tag/1.1_distort)
-- [Filmgrain](https://github.com/haasn/gentoo-conf/tree/xor/home/nand/.mpv/shaders)
-- [hdeband and nlmeans](https://github.com/AN3223/dotfiles/tree/master/.config/mpv/shaders)
-- [JointBilateral and FastBilateral](https://github.com/Artoriuz/glsl-joint-bilateral)
-- [KrigBilateral and adaptive-sharpen](https://gist.github.com/igv)
-- [NNEDI3 and RAVU](https://github.com/bjin/mpv-prescalers/)
+Shaders are organized by category in `portable_config/shaders/`. All are accessible and documented in `input.conf`.
+
+**Luma Upscalers**
+| Shader | Best for |
+|---|---|
+| [CuNNy](https://github.com/funnyplanter/CuNNy) | Anime — fast CNN upscaler with multiple quality tiers and dp4a acceleration |
+| [ArtCNN](https://github.com/Artoriuz/ArtCNN) | General content — modern CNN upscaler with denoising and downscaling variants |
+| [Ani4Kv2 / AniSD](https://github.com/Sirosky/Upscale-Hub) | Anime — Ani4Kv2 for HD/BD, AniSD for sub-720p sources |
+| [FSRCNNX](https://github.com/igv/FSRCNN-TensorFlow/releases) | Live-action — high quality prescaler, x2 8-0-4-1 and 16-0-4-1 variants |
+| [NNEDI3](https://github.com/bjin/mpv-prescalers) | High-quality prescaling, slower than FSRCNNX |
+| [RAVU](https://github.com/bjin/mpv-prescalers) | Fast prescaling — Lite, Zoom, and Antiringing variants |
+| [Anime4K](https://github.com/bloc97/Anime4K/tree/master/glsl) | Anime upscaling and restoration — full shader set included |
+| [ACNet / ARNet](https://github.com/TianZerL/ACNetGLSL) | Lightweight anime upscalers from Anime4KCPP with denoising variants |
+| [AMD CAS, FSR, NVScaler, NVSharpen](https://gist.github.com/agyild) | GPU vendor upscalers and sharpeners |
+
+**Chroma Upscalers**
+| Shader | Notes |
+|---|---|
+| [CfL Prediction](https://github.com/Artoriuz/glsl-chroma-from-luma-prediction) | Default — uses luma information to reconstruct chroma detail |
+| [KrigBilateral](https://gist.github.com/igv) | Alternative chroma upscaler |
+| [JointBilateral / FastBilateral](https://github.com/Artoriuz/glsl-joint-bilateral) | Bilateral filter-based chroma upscalers |
+
+**Downscalers / Sharpeners / Other**
+| Shader | Notes |
+|---|---|
+| [SSimDownscaler](https://gist.github.com/igv) | Perceptually better downscaling, used automatically for 4K+ sources |
+| [SSimSuperRes](https://gist.github.com/igv) | An accurate sharpener + antiringing shader |
+| [nlmeans](https://github.com/AN3223/dotfiles) | Non-local means denoiser |
+| [hdeband](https://github.com/AN3223/dotfiles) | Shader-based debanding |
+| [adaptive-sharpen](https://gist.github.com/igv) | Content-aware sharpening |
+| [Film Grain](https://github.com/haasn/gentoo-conf) | Adds synthetic film grain (normal and smooth variants) |
 
 ---
 
-# References
+## References
 
-These repositories were used as references while building this configuration:
+Repositories used as references while building this configuration:
 
 - [tuilakhanh/mpv-config](https://github.com/tuilakhanh/mpv-config)
 - [Zabooby/mpv-config](https://github.com/Zabooby/mpv-config/)
