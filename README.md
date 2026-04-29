@@ -77,9 +77,9 @@ mpv.exe
 
 ---
 
-### 4. Updating MPV
+### 4. Updating MPV or Downloading yt-dlp for Youtube playback support.
 
-To update MPV later, right-click:
+To update MPV or to update/install `yt-dlp`, right-click:
 
 ```text
 updater.bat
@@ -243,7 +243,7 @@ Or choose another supported option from the MPV manual.
 
 ---
 
-### Default Vulkan Shader
+### Default Shader for HD and FHD
 
 In `profiles.conf`, this shader requires Vulkan:
 
@@ -251,7 +251,8 @@ In `profiles.conf`, this shader requires Vulkan:
 glsl-shader="~~/shaders/CuNNy/ds/dp4a/CuNNy-4x16-DS-Q.glsl"
 ```
 
-If you are not using Vulkan, delete this line or replace it with another shader.
+> [!NOTE]
+> This Shader is for Anime content and requires Vulkan. If you are not using Vulkan or if you don't watch anime mainly and want to avoid having to change Shaders everytime, delete this line or replace it with another shader that suits you.
 
 ---
 
@@ -336,12 +337,6 @@ For example, for 1440p:
 ytdl-format=bestvideo[height<=?1440]+bestaudio/best[height<=?1440]
 ```
 
-For 2160p:
-
-```conf
-ytdl-format=bestvideo[height<=?2160]+bestaudio/best[height<=?2160]
-```
-
 ---
 
 ## Dither Depth
@@ -354,7 +349,8 @@ The default dither depth is set to 10-bit:
 dither-depth=10
 ```
 
-Set this to match your display bit depth.
+> [!IMPORTANT]
+> Set this to match your display bit depth.
 
 On Windows, you can check this under:
 
@@ -374,7 +370,8 @@ You can also set:
 dither-depth=auto
 ```
 
-> Note: the on-the-wire bit depth usually cannot be detected unless you are using `gpu-api=d3d11`. Explicitly setting the value to your display's bit depth is recommended because dithering performed by some LCD panels can be low quality.
+> [!NOTE]
+> The on-the-wire bit depth usually cannot be detected unless you are using `gpu-api=d3d11`. Explicitly setting the value to your display's bit depth is recommended because dithering performed by some LCD panels can be low quality.
 
 ---
 
