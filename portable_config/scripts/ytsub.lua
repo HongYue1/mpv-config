@@ -1,10 +1,13 @@
 -- optionally import module, from SO
 local function want(name)
-  local out; if xpcall(
-      function()  out = require(name) end,
-      function(e) out = e end)
-  then return out          -- success
-  else return nil, out end -- error
+    local out; if xpcall(
+            function() out = require(name) end,
+            function(e) out = e end)
+    then
+        return out         -- success
+    else
+        return nil, out
+    end                    -- error
 end
 
 local utils = require('mp.utils')
@@ -35,16 +38,16 @@ if not res or not res.is_dir then
         options.cache_dir = string.gsub(options.cache_dir, "/", "\\")
         command = {
             name = "subprocess",
-            args = {"cmd", "/c", "if not exist", options.cache_dir, "mkdir", options.cache_dir},
+            args = { "cmd", "/c", "if not exist", options.cache_dir, "mkdir", options.cache_dir },
             playback_only = false,
         }
     else
         -- This is likely Linux, macOS, or another Unix-like system
         -- Use mkdir -p to create parent directories if they don't exist
-        options.cache_dir =  utils.join_path(os.getenv("HOME"), options.cache_dir)
+        options.cache_dir = utils.join_path(os.getenv("HOME"), options.cache_dir)
         command = {
             name = "subprocess",
-            args = {"mkdir", "-p", options.cache_dir},
+            args = { "mkdir", "-p", options.cache_dir },
             playback_only = false,
         }
     end
@@ -63,7 +66,7 @@ local function filter_sub(path)
     end
     local out = io.open(path, "w")
     if out ~= nil then
-        for i,line in pairs(lines) do
+        for i, line in pairs(lines) do
             if i < 5 or i % 8 == 5 or i % 8 == 7 or i % 8 == 0 then
                 out:write(line)
                 out:write("\n")
@@ -78,7 +81,7 @@ local function load_autosub(lang, sub_info, ytid, is_primary)
     local url
 
     if sub_info ~= nil then
-        for _,v in pairs(sub_info) do
+        for _, v in pairs(sub_info) do
             lang_name = v["name"]
             if v["ext"] == "vtt" then
                 url = v["url"]
@@ -90,7 +93,7 @@ local function load_autosub(lang, sub_info, ytid, is_primary)
         return
     end
 
-    info('loading '..lang_name)
+    info('loading ' .. lang_name)
 
     local subfile_base = utils.join_path(options.cache_dir, ytid) -- for yt-dlp
     local subfile = subfile_base .. "." .. lang .. ".vtt"
@@ -119,7 +122,7 @@ local function load_autosub(lang, sub_info, ytid, is_primary)
             if ytdl_path ~= nil then
                 mp.command_native({
                     name = "subprocess",
-                    args = {ytdl_path, "--skip-download", "--sub-lang", lang, "--write-auto-sub", "-o", subfile_base, "--", ytid}
+                    args = { ytdl_path, "--skip-download", "--sub-lang", lang, "--write-auto-sub", "-o", subfile_base, "--", ytid }
                 })
                 f = io.open(subfile, "r")
                 if f ~= nil then
@@ -143,7 +146,7 @@ local function load_autosub(lang, sub_info, ytid, is_primary)
             local n_subs = 0
             local i = 0
             while i < n_tracks do
-                if mp.get_property_native("track-list/"..i.."/type") == "sub" then
+                if mp.get_property_native("track-list/" .. i .. "/type") == "sub" then
                     n_subs = n_subs + 1
                 end
                 i = i + 1
@@ -177,7 +180,7 @@ local function ytsub(is_auto)
         local source_lang = options.source_lang
 
         local orig_lang
-        for k,_ in pairs(subs) do
+        for k, _ in pairs(subs) do
             if string.find(k, "(orig)") ~= nil then
                 orig_lang = k
                 break
@@ -186,17 +189,16 @@ local function ytsub(is_auto)
 
         load_autosub(orig_lang, subs[orig_lang], j["id"], true)
         if source_lang ~= nil then
-            if orig_lang == source_lang.."-orig" then
-                info("source language and original language are the same ("..source_lang..")")
+            if orig_lang == source_lang .. "-orig" then
+                info("source language and original language are the same (" .. source_lang .. ")")
             else
                 load_autosub(source_lang, subs[source_lang], j["id"], false)
             end
         end
-
     else
         -- let the user select the language to load interactively
         local langs = {}
-        for k,_ in pairs(subs) do
+        for k, _ in pairs(subs) do
             table.insert(langs, k)
         end
 
