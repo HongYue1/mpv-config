@@ -66,6 +66,10 @@ Right-click `updater.bat` and select **Run as administrator**. The updater lets 
 
 [Supported sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
 
+#### 5. Updating the config
+
+To update the configuration, delete the old portable_config then redo step 3 of the installtion to download the latest version.
+
 ---
 
 ### Linux / macOS
