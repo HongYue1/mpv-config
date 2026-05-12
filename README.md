@@ -122,6 +122,8 @@ This config defaults to Vulkan. If your GPU doesn't support Vulkan or you have p
 gpu-api=vulkan      # change to: auto, d3d11, or opengl
 hwdec=vulkan        # change to: auto, auto-copy, or auto-safe
 ```
+> [!Note]
+> On Linux Set hwdec to auto or auto-copy (try both) if you face any playback issues especially with youtube videos.
 
 ### Default Shader for HD Content
 
