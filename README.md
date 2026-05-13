@@ -184,6 +184,22 @@ d3d11-exclusive-fs=yes
 dither-depth=auto
 ```
 
+### UI font scale
+
+If the UI font looks too small, especially on Linux, you can edit the following line in `portabe_config/script-opts/uosc.conf`
+
+```
+# Adjust the text scaling to fit your font
+# Try something like 1.25 for 125% scaling
+font_scale=1
+```
+
+### Getting keyboard Multimedia key support on linux (MPRIS)
+
+- Download the latest `mpris-x86_64-unknown-linux-gnu.so` file from here: https://github.com/eNV25/mpv-mpris2/releases
+- Rename it to `mpris.so` and move it to the `~/.config/mpv/scripts/` folder.
+- Multimedia keys and desktop integrations should work now.
+
 ---
 
 ## Important Notes
