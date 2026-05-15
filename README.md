@@ -41,8 +41,8 @@ Download the latest 64-bit Windows build from the Shinchiro builds page:
 
 [Download mpv for Windows](https://github.com/shinchiro/mpv-winbuild-cmake/releases)
 
-- `mpv-x86_64-*.7z` — recommended for most systems
-- `mpv-x86_64-v3-*.7z` — for newer CPUs (Ryzen 5000+, Intel 12th gen+)
+- `mpv-x86_64-*.7z` — for old hardware only (pre-2013 CPUs)
+- `mpv-x86_64-v3-*.7z` — recommended for most systems (Intel Haswell 2013+, AMD Zen 2015+)
 
 Extract the archive somewhere permanent. This folder will be your main mpv folder — do not move it after installation.
 
