@@ -200,6 +200,15 @@ font_scale=1
 - Rename it to `mpris.so` and move it to the `~/.config/mpv/scripts/` folder.
 - Multimedia keys and desktop integrations should work now.
 
+### Youtube playback on Linux
+
+Make sure to the latest yt-dlp version, preferably the latest standalone binary.
+
+```bash
+sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+sudo chmod +x /usr/local/bin/yt-dlp
+```
+
 ---
 
 ## Important Notes
