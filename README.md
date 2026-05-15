@@ -135,7 +135,8 @@ The default shader for 720p–1080p content is CuNNy, which requires Vulkan and 
 glsl-shader="~~/shaders/CuNNy/ds/dp4a/CuNNy-4x16-DS-Q.glsl"
 ```
 
-> **Note:** If you primarily watch live-action content or aren't using Vulkan, delete or replace this line with a shader that suits your content.
+> [!Note]
+> If you primarily watch live-action content or aren't using Vulkan, delete or replace this line with a shader that suits your content.
 
 ### Dither Depth
 
