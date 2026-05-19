@@ -1,17 +1,10 @@
-// SSimSuperRes by Shiandow
-//
-// This library is free software; you can redistribute it and/or
-// modify it under the terms of the GNU Lesser General Public
-// License as published by the Free Software Foundation; either
-// version 3.0 of the License, or (at your option) any later version.
-// 
-// This library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-// Lesser General Public License for more details.
-// 
-// You should have received a copy of the GNU Lesser General Public
-// License along with this library.
+// SSimSuperRes Improved
+// Derived from SSimSuperRes by Shiandow
+// Original license: LGPL v3.0 or later
+
+// ============================================================================
+// Pass 1: Vertical downscale into LOWRES
+// ============================================================================
 
 //!HOOK POSTKERNEL
 //!BIND HOOKED
@@ -19,41 +12,74 @@
 //!HEIGHT NATIVE_CROPPED.h
 //!WHEN NATIVE_CROPPED.h OUTPUT.h <
 //!COMPONENTS 4
-//!DESC SSSR Downscaling I
+//!DESC SSSR Downscale Y
 
-#define axis        1
+const vec3  SSSR_LUMA = vec3(0.2126, 0.7152, 0.0722);
+const float SSSR_EPS = 1e-8;
+const float SSSR_VAR_EPS = 5e-7;
 
-#define offset      vec2(0,0)
+// Exact Mitchell-Netravali, B = C = 1/3.
+// Support radius: 2.
+float sssrMitchell(float x)
+{
+    x = abs(x);
 
-#define MN(B,C,x)   (x < 1.0 ? ((2.-1.5*B-(C))*x + (-3.+2.*B+C))*x*x + (1.-(B)/3.) : (((-(B)/6.-(C))*x + (B+5.*C))*x + (-2.*B-8.*C))*x+((4./3.)*B+4.*C))
-#define Kernel(x)   MN(0.334, 0.333, abs(x))
-#define taps        2.0
+    if (x >= 2.0)
+        return 0.0;
 
-#define Luma(rgb)   dot(rgb*rgb, vec3(0.2126, 0.7152, 0.0722))
-
-vec4 hook() {
-    float low  = ceil((HOOKED_pos - taps/input_size) * HOOKED_size - offset - 0.5)[axis];
-    float high = floor((HOOKED_pos + taps/input_size) * HOOKED_size - offset - 0.5)[axis];
-
-    float W = 0.0;
-    vec4 avg = vec4(0);
-    vec2 pos = HOOKED_pos;
-    vec4 tex;
-
-    for (float k = low; k <= high; k++) {
-        pos[axis] = HOOKED_pt[axis] * (k - offset[axis] + 0.5);
-        float rel = (pos[axis] - HOOKED_pos[axis])*input_size[axis];
-        float w = Kernel(rel);
-
-        tex.rgb = textureLod(HOOKED_raw, pos, 0.0).rgb * HOOKED_mul;
-        tex.a = Luma(tex.rgb);
-        avg += w * tex;
-        W += w;
+    if (x < 1.0) {
+        return ((7.0 / 6.0) * x - 2.0) * x * x + 8.0 / 9.0;
+    } else {
+        return (((-7.0 / 18.0) * x + 2.0) * x - 10.0 / 3.0) * x + 16.0 / 9.0;
     }
-    avg /= W;
-
-    return vec4(avg.rgb, max(abs(avg.a - Luma(avg.rgb)), 5e-7));
 }
+
+float sssrSqLuma(vec3 c)
+{
+    return dot(c * c, SSSR_LUMA);
+}
+
+vec4 hook()
+{
+    float center = HOOKED_pos.y * HOOKED_size.y - 0.5;
+    float radius = 2.0 * HOOKED_size.y / input_size.y;
+
+    float lo = ceil(center - radius);
+    float hi = floor(center + radius);
+
+    vec2 p = HOOKED_pos;
+
+    vec3  rgbSum = vec3(0.0);
+    float sqLumSum = 0.0;
+    float weightSum = 0.0;
+
+    for (float k = lo; k <= hi; k += 1.0) {
+        p.y = HOOKED_pt.y * (k + 0.5);
+
+        float rel = (p.y - HOOKED_pos.y) * input_size.y;
+        float w = sssrMitchell(rel);
+
+        vec3 c = textureLod(HOOKED_raw, p, 0.0).rgb * HOOKED_mul;
+
+        rgbSum += w * c;
+        sqLumSum += w * sssrSqLuma(c);
+        weightSum += w;
+    }
+
+    float invW = 1.0 / max(weightSum, SSSR_EPS);
+
+    vec3 mean = rgbSum * invW;
+    float meanSqLum = sqLumSum * invW;
+
+    float v = max(abs(meanSqLum - sssrSqLuma(mean)), SSSR_VAR_EPS);
+
+    return vec4(mean, v);
+}
+
+
+// ============================================================================
+// Pass 2: Horizontal downscale into LOWRES
+// ============================================================================
 
 //!HOOK POSTKERNEL
 //!BIND LOWRES
@@ -62,41 +88,79 @@ vec4 hook() {
 //!HEIGHT NATIVE_CROPPED.h
 //!WHEN NATIVE_CROPPED.w OUTPUT.w <
 //!COMPONENTS 4
-//!DESC SSSR Downscaling II
+//!DESC SSSR Downscale X
 
-#define axis        0
+const vec3  SSSR_LUMA = vec3(0.2126, 0.7152, 0.0722);
+const float SSSR_EPS = 1e-8;
+const float SSSR_VAR_EPS = 5e-7;
 
-#define offset      vec2(0,0)
+float sssrMitchell(float x)
+{
+    x = abs(x);
 
-#define MN(B,C,x)   (x < 1.0 ? ((2.-1.5*B-(C))*x + (-3.+2.*B+C))*x*x + (1.-(B)/3.) : (((-(B)/6.-(C))*x + (B+5.*C))*x + (-2.*B-8.*C))*x+((4./3.)*B+4.*C))
-#define Kernel(x)   MN(0.334, 0.333, abs(x))
-#define taps        2.0
+    if (x >= 2.0)
+        return 0.0;
 
-#define Luma(rgb)   dot(rgb*rgb, vec3(0.2126, 0.7152, 0.0722))
-
-vec4 hook() {
-    float low  = ceil((LOWRES_pos - taps/input_size) * LOWRES_size - offset - 0.5)[axis];
-    float high = floor((LOWRES_pos + taps/input_size) * LOWRES_size - offset - 0.5)[axis];
-
-    float W = 0.0;
-    vec4 avg = vec4(0);
-    vec2 pos = LOWRES_pos;
-    vec4 tex;
-
-    for (float k = low; k <= high; k++) {
-        pos[axis] = LOWRES_pt[axis] * (k - offset[axis] + 0.5);
-        float rel = (pos[axis] - LOWRES_pos[axis])*input_size[axis];
-        float w = Kernel(rel);
-
-        tex.rgb = textureLod(LOWRES_raw, pos, 0.0).rgb * LOWRES_mul;
-        tex.a = Luma(tex.rgb);
-        avg += w * tex;
-        W += w;
+    if (x < 1.0) {
+        return ((7.0 / 6.0) * x - 2.0) * x * x + 8.0 / 9.0;
+    } else {
+        return (((-7.0 / 18.0) * x + 2.0) * x - 10.0 / 3.0) * x + 16.0 / 9.0;
     }
-    avg /= W;
-
-    return vec4(avg.rgb, max(abs(avg.a - Luma(avg.rgb)), 5e-7) + LOWRES_texOff(0).a);
 }
+
+float sssrSqLuma(vec3 c)
+{
+    return dot(c * c, SSSR_LUMA);
+}
+
+vec4 hook()
+{
+    float center = LOWRES_pos.x * LOWRES_size.x - 0.5;
+    float radius = 2.0 * LOWRES_size.x / input_size.x;
+
+    float lo = ceil(center - radius);
+    float hi = floor(center + radius);
+
+    vec2 p = LOWRES_pos;
+
+    vec3  rgbSum = vec3(0.0);
+    float sqLumSum = 0.0;
+    float prevVarSum = 0.0;
+    float weightSum = 0.0;
+
+    for (float k = lo; k <= hi; k += 1.0) {
+        p.x = LOWRES_pt.x * (k + 0.5);
+
+        float rel = (p.x - LOWRES_pos.x) * input_size.x;
+        float w = sssrMitchell(rel);
+
+        vec4 s = textureLod(LOWRES_raw, p, 0.0);
+        vec3 c = s.rgb * LOWRES_mul;
+
+        rgbSum += w * c;
+        sqLumSum += w * sssrSqLuma(c);
+
+        // Correctly filter pass-1 vertical variance along with RGB.
+        prevVarSum += w * s.a;
+
+        weightSum += w;
+    }
+
+    float invW = 1.0 / max(weightSum, SSSR_EPS);
+
+    vec3 mean = rgbSum * invW;
+    float meanSqLum = sqLumSum * invW;
+
+    float thisVar = max(abs(meanSqLum - sssrSqLuma(mean)), SSSR_VAR_EPS);
+    float prevVar = max(prevVarSum * invW, 0.0);
+
+    return vec4(mean, thisVar + prevVar);
+}
+
+
+// ============================================================================
+// Pass 3: Single-pass structural variance/covariance
+// ============================================================================
 
 //!HOOK POSTKERNEL
 //!BIND PREKERNEL
@@ -105,40 +169,94 @@ vec4 hook() {
 //!WIDTH NATIVE_CROPPED.w
 //!HEIGHT NATIVE_CROPPED.h
 //!WHEN NATIVE_CROPPED.h OUTPUT.h <
-//!COMPONENTS 2
-//!DESC SSSR var
+//!COMPONENTS 4
+//!DESC SSSR Variance/Covariance
 
-#define spread      1.0 / 4.0
+const vec3  SSSR_LUMA = vec3(0.2126, 0.7152, 0.0722);
+const float SSSR_VAR_FLOOR = 1e-6;
 
-#define GetL(x,y)   PREKERNEL_tex(PREKERNEL_pt * (PREKERNEL_pos * input_size + tex_offset + vec2(x,y))).rgb
-#define GetH(x,y)   LOWRES_texOff(vec2(x,y)).rgb
+// Normalized cross-window weights:
+// center = 0.5, four cardinal neighbors = 0.125 each.
+// This is equivalent to original spread = 0.25, norm = 1 / 2.
+const float SSSR_W_CENTER = 0.5;
+const float SSSR_W_SIDE   = 0.125;
 
-#define Luma(rgb)   dot(rgb*rgb, vec3(0.2126, 0.7152, 0.0722))
-#define diff(x,y)   vec2(Luma((GetL(x,y) - meanL)), Luma((GetH(x,y) - meanH)))
-
-vec4 hook() {
-    vec3 meanL = GetL(0,0);
-    vec3 meanH = GetH(0,0);
-    for (int X=-1; X<=1; X+=2) {
-        meanL += GetL(X,0) * spread;
-        meanH += GetH(X,0) * spread;
-    }
-    for (int Y=-1; Y<=1; Y+=2) {
-        meanL += GetL(0,Y) * spread;
-        meanH += GetH(0,Y) * spread;
-    }
-    meanL /= (1.0 + 4.0*spread);
-    meanH /= (1.0 + 4.0*spread);
-
-    vec2 var = diff(0,0);
-    for (int X=-1; X<=1; X+=2)
-        var += diff(X,0) * spread;
-
-    for (int Y=-1; Y<=1; Y+=2)
-        var += diff(0,Y) * spread;
-
-    return vec4(max(var / (1.0 + 4.0*spread), vec2(1e-6)), 0, 0);
+float sssrLinLuma(vec3 c)
+{
+    return dot(c, SSSR_LUMA);
 }
+
+void sssrAccumSample(
+    vec3 l,
+    vec3 h,
+    float w,
+    inout vec3 meanL,
+    inout vec3 meanH,
+    inout vec3 meanLL,
+    inout vec3 meanHH,
+    inout vec3 meanLH
+) {
+    meanL  += w * l;
+    meanH  += w * h;
+    meanLL += w * l * l;
+    meanHH += w * h * h;
+    meanLH += w * l * h;
+}
+
+vec4 hook()
+{
+    vec2 baseL = PREKERNEL_pos * input_size + tex_offset;
+
+    vec3 meanL  = vec3(0.0);
+    vec3 meanH  = vec3(0.0);
+    vec3 meanLL = vec3(0.0);
+    vec3 meanHH = vec3(0.0);
+    vec3 meanLH = vec3(0.0);
+
+    vec3 l;
+    vec3 h;
+
+    l = PREKERNEL_tex(PREKERNEL_pt * (baseL + vec2( 0.0,  0.0))).rgb;
+    h = LOWRES_texOff(vec2( 0.0,  0.0)).rgb;
+    sssrAccumSample(l, h, SSSR_W_CENTER, meanL, meanH, meanLL, meanHH, meanLH);
+
+    l = PREKERNEL_tex(PREKERNEL_pt * (baseL + vec2(-1.0,  0.0))).rgb;
+    h = LOWRES_texOff(vec2(-1.0,  0.0)).rgb;
+    sssrAccumSample(l, h, SSSR_W_SIDE, meanL, meanH, meanLL, meanHH, meanLH);
+
+    l = PREKERNEL_tex(PREKERNEL_pt * (baseL + vec2( 1.0,  0.0))).rgb;
+    h = LOWRES_texOff(vec2( 1.0,  0.0)).rgb;
+    sssrAccumSample(l, h, SSSR_W_SIDE, meanL, meanH, meanLL, meanHH, meanLH);
+
+    l = PREKERNEL_tex(PREKERNEL_pt * (baseL + vec2( 0.0, -1.0))).rgb;
+    h = LOWRES_texOff(vec2( 0.0, -1.0)).rgb;
+    sssrAccumSample(l, h, SSSR_W_SIDE, meanL, meanH, meanLL, meanHH, meanLH);
+
+    l = PREKERNEL_tex(PREKERNEL_pt * (baseL + vec2( 0.0,  1.0))).rgb;
+    h = LOWRES_texOff(vec2( 0.0,  1.0)).rgb;
+    sssrAccumSample(l, h, SSSR_W_SIDE, meanL, meanH, meanLL, meanHH, meanLH);
+
+    // Correct single-pass forms:
+    // Var(L)   = E[L²]  - E[L]²
+    // Var(H)   = E[H²]  - E[H]²
+    // Cov(L,H) = E[LH]  - E[L]E[H]
+    //
+    // Important: do NOT square these vectors again before luma projection.
+    vec3 varL3 = max(meanLL - meanL * meanL, vec3(0.0));
+    vec3 varH3 = max(meanHH - meanH * meanH, vec3(0.0));
+    vec3 covLH3 = meanLH - meanL * meanH;
+
+    float varL = max(sssrLinLuma(varL3), SSSR_VAR_FLOOR);
+    float varH = max(sssrLinLuma(varH3), SSSR_VAR_FLOOR);
+    float covLH = sssrLinLuma(covLH3);
+
+    return vec4(varL, varH, covLH, 0.0);
+}
+
+
+// ============================================================================
+// Pass 4: Covariance/confidence-guided final reconstruction
+// ============================================================================
 
 //!HOOK POSTKERNEL
 //!BIND HOOKED
@@ -146,58 +264,180 @@ vec4 hook() {
 //!BIND LOWRES
 //!BIND var
 //!WHEN NATIVE_CROPPED.h OUTPUT.h <
-//!DESC SSSR final pass
+//!DESC SSSR Final
 
-#define oversharp   0.5
+// Main detail strength.
+// Original SSSR used oversharp = 0.5.
+#define SSSR_OVERSHARP 0.50
 
-// -- Window Size --
-#define taps        3.0
-#define even        (taps - 2.0 * floor(taps / 2.0) == 0.0)
-#define minX        int(1.0-ceil(taps/2.0))
-#define maxX        int(floor(taps/2.0))
+// Anti-ringing blend.
+// 0.0 = disabled.
+// 0.20 - 0.40 recommended.
+#define SSSR_ANTIRINGING 0.30
 
-#define Kernel(x)   cos(acos(-1.0)*(x)/taps) // Hann kernel
+// Correlation gate.
+// Detail is injected mostly where PREKERNEL and LOWRES structure agree.
+#define SSSR_CORR_LOW  0.05
+#define SSSR_CORR_HIGH 0.45
 
-// -- Input processing --
-#define var(x,y)    var_tex(var_pt * (pos + vec2(x,y) + 0.5)).rg
-#define GetL(x,y)   PREKERNEL_tex(PREKERNEL_pt * (pos + tex_offset + vec2(x,y) + 0.5)).rgb
-#define GetH(x,y)   LOWRES_tex(LOWRES_pt * (pos + vec2(x,y) + 0.5))
+// Safety clamp for the regression/range gain.
+#define SSSR_MAX_SLOPE 2.50
 
-#define Luma(rgb)   dot(rgb*rgb, vec3(0.2126, 0.7152, 0.0722))
+const vec3  SSSR_LUMA = vec3(0.2126, 0.7152, 0.0722);
+const float SSSR_PI_OVER_3 = 1.04719755119659774615;
+const float SSSR_EPS = 1e-6;
+const float SSSR_WEIGHT_EPS = 1e-7;
 
-vec4 hook() {
-    vec4 c0 = HOOKED_texOff(0);
+float sssrSqLuma(vec3 c)
+{
+    return dot(c * c, SSSR_LUMA);
+}
 
-    vec2 pos = HOOKED_pos * LOWRES_size - vec2(0.5);
-    vec2 offset = pos - (even ? floor(pos) : round(pos));
-    pos -= offset;
+float sssrKernel3(float x)
+{
+    return max(cos(SSSR_PI_OVER_3 * x), 0.0);
+}
 
-    vec2 mVar = vec2(0.0);
-    for (int X=-1; X<=1; X++)
-    for (int Y=-1; Y<=1; Y++) {
-        vec2 w = clamp(1.5 - abs(vec2(X,Y)), 0.0, 1.0);
-        mVar += w.r * w.g * vec2(GetH(X,Y).a, 1.0);
-    }
-    mVar.r /= mVar.g;
+float sssrConfidence(vec3 v, float extraVar)
+{
+    float varL = max(v.x, SSSR_EPS);
+    float varH = max(v.y + extraVar, SSSR_EPS);
+    float cov  = max(v.z, 0.0);
 
-    // Calculate faithfulness force
+    float corr = cov * inversesqrt(max(varL * varH, SSSR_EPS));
+    corr = clamp(corr, 0.0, 1.0);
+
+    return smoothstep(SSSR_CORR_LOW, SSSR_CORR_HIGH, corr);
+}
+
+float sssrRegressionSlope(vec3 v, float extraVar)
+{
+    float varL = max(v.x, SSSR_EPS);
+    float varH = max(v.y + extraVar, SSSR_EPS);
+    float cov  = max(v.z, 0.0);
+
+    float ratioSlope = sqrt(varL / varH);
+    float regSlope = cov / varH;
+
+    return min(regSlope, ratioSlope * SSSR_MAX_SLOPE);
+}
+
+#define SSSR_H(X,Y) LOWRES_tex(LOWRES_pt * (base + vec2(float(X), float(Y))))
+#define SSSR_L(X,Y) PREKERNEL_tex(PREKERNEL_pt * (base + tex_offset + vec2(float(X), float(Y)))).rgb
+#define SSSR_V(X,Y) var_tex(var_pt * (base + vec2(float(X), float(Y)))).rgb
+
+#define SSSR_ADD_TAP(X,Y,H,K) {                                                        \
+vec3 lSample = SSSR_L(X,Y);                                                        \
+vec3 vv = SSSR_V(X,Y);                                                             \
+\
+float colorErr = sssrSqLuma(c0rgb - (H).rgb);                                      \
+float w = (K) / (colorErr + (H).a + SSSR_WEIGHT_EPS);                              \
+\
+float conf = sssrConfidence(vv, mVar);                                             \
+float slope = sssrRegressionSlope(vv, mVar);                                       \
+float r = -(1.0 + SSSR_OVERSHARP) * slope;                                         \
+\
+vec3 force = lSample - c0rgb + r * ((H).rgb - c0rgb);                              \
+\
+acc += w * conf * force;                                                           \
+weightSum += w;                                                                    \
+\
+lMin = min(lMin, lSample);                                                         \
+lMax = max(lMax, lSample);                                                         \
+}
+
+vec4 hook()
+{
+    vec4 c0 = HOOKED_texOff(vec2(0.0));
+    vec3 c0rgb = c0.rgb;
+
+    // Current output position in LOWRES pixel space.
+    vec2 lowPos = HOOKED_pos * LOWRES_size - vec2(0.5);
+
+    // taps = 3, odd window, equivalent to round() for positive image coordinates.
+    vec2 center = floor(lowPos + vec2(0.5));
+    vec2 offset = lowPos - center;
+
+    // Pixel-centered base coordinate for LOWRES / PREKERNEL / var.
+    vec2 base = center + vec2(0.5);
+
+    // Cache LOWRES 3x3 once. Used for both mVar and reconstruction.
+    vec4 h_mm = SSSR_H(-1, -1);
+    vec4 h_0m = SSSR_H( 0, -1);
+    vec4 h_pm = SSSR_H( 1, -1);
+
+    vec4 h_m0 = SSSR_H(-1,  0);
+    vec4 h_00 = SSSR_H( 0,  0);
+    vec4 h_p0 = SSSR_H( 1,  0);
+
+    vec4 h_mp = SSSR_H(-1,  1);
+    vec4 h_0p = SSSR_H( 0,  1);
+    vec4 h_pp = SSSR_H( 1,  1);
+
+    vec3 hMin = h_00.rgb;
+    vec3 hMax = h_00.rgb;
+
+    hMin = min(hMin, h_mm.rgb); hMax = max(hMax, h_mm.rgb);
+    hMin = min(hMin, h_0m.rgb); hMax = max(hMax, h_0m.rgb);
+    hMin = min(hMin, h_pm.rgb); hMax = max(hMax, h_pm.rgb);
+    hMin = min(hMin, h_m0.rgb); hMax = max(hMax, h_m0.rgb);
+    hMin = min(hMin, h_p0.rgb); hMax = max(hMax, h_p0.rgb);
+    hMin = min(hMin, h_mp.rgb); hMax = max(hMax, h_mp.rgb);
+    hMin = min(hMin, h_0p.rgb); hMax = max(hMax, h_0p.rgb);
+    hMin = min(hMin, h_pp.rgb); hMax = max(hMax, h_pp.rgb);
+
+    // Same triangular 3x3 alpha smoothing as the original:
+    // center 1, edges 0.5, corners 0.25, normalized by total 4.
+    float mVar = 0.25 * (
+        h_00.a +
+        0.5 * (h_m0.a + h_p0.a + h_0m.a + h_0p.a) +
+        0.25 * (h_mm.a + h_pm.a + h_mp.a + h_pp.a)
+    );
+
+    // Precompute separable 3-tap cosine kernel.
+    float kxm = sssrKernel3(-1.0 - offset.x);
+    float kx0 = sssrKernel3( 0.0 - offset.x);
+    float kxp = sssrKernel3( 1.0 - offset.x);
+
+    float kym = sssrKernel3(-1.0 - offset.y);
+    float ky0 = sssrKernel3( 0.0 - offset.y);
+    float kyp = sssrKernel3( 1.0 - offset.y);
+
+    vec3 acc = vec3(0.0);
     float weightSum = 0.0;
-    vec3 diff = vec3(0);
 
-    for (int X = minX; X <= maxX; X++)
-    for (int Y = minX; Y <= maxX; Y++)
-    {
-        float R = (-1.0 - oversharp) * sqrt(var(X,Y).r / (var(X,Y).g + mVar.r));
+    vec3 lMin = vec3( 1e20);
+    vec3 lMax = vec3(-1e20);
 
-        vec2 krnl = Kernel(vec2(X,Y) - offset);
-        float weight = krnl.r * krnl.g / (Luma((c0.rgb - GetH(X,Y).rgb)) + GetH(X,Y).a);
+    SSSR_ADD_TAP(-1, -1, h_mm, kxm * kym);
+    SSSR_ADD_TAP( 0, -1, h_0m, kx0 * kym);
+    SSSR_ADD_TAP( 1, -1, h_pm, kxp * kym);
 
-        diff += weight * (GetL(X,Y) + GetH(X,Y).rgb * R + (-1.0 - R) * (c0.rgb));
-        weightSum += weight;
-    }
-    diff /= weightSum;
+    SSSR_ADD_TAP(-1,  0, h_m0, kxm * ky0);
+    SSSR_ADD_TAP( 0,  0, h_00, kx0 * ky0);
+    SSSR_ADD_TAP( 1,  0, h_p0, kxp * ky0);
 
-    c0.rgb = ((c0.rgb) + diff);
+    SSSR_ADD_TAP(-1,  1, h_mp, kxm * kyp);
+    SSSR_ADD_TAP( 0,  1, h_0p, kx0 * kyp);
+    SSSR_ADD_TAP( 1,  1, h_pp, kxp * kyp);
 
+    vec3 result = c0rgb + acc / max(weightSum, SSSR_EPS);
+
+    // Conservative anti-ringing.
+    // Uses cached LOWRES and already-fetched PREKERNEL extrema.
+    vec3 hRange = max(hMax - hMin, vec3(SSSR_EPS));
+    vec3 limitPad = hRange * (0.40 + 0.25 * SSSR_OVERSHARP) + vec3(SSSR_EPS);
+
+    vec3 limitMin = min(hMin, c0rgb) - limitPad;
+    vec3 limitMax = max(hMax, c0rgb) + limitPad;
+
+    // Allow some PREKERNEL extrema for genuine restored detail.
+    limitMin = min(limitMin, mix(hMin, lMin, 0.35));
+    limitMax = max(limitMax, mix(hMax, lMax, 0.35));
+
+    vec3 limited = clamp(result, limitMin, limitMax);
+    result = mix(result, limited, SSSR_ANTIRINGING);
+
+    c0.rgb = result;
     return c0;
 }
