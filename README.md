@@ -125,6 +125,9 @@ hwdec=vulkan        # change to: auto, auto-copy, or auto-safe
 > [!Note]
 > On Linux Set hwdec to auto or auto-copy (try both) if you face any playback issues especially with youtube videos.
 
+> [!Note]
+> nvdec and nvdec-copy are the newest, and recommended method to do hardware decoding on Nvidia GPUs. [Docs](https://mpv.io/manual/stable/#options-hwdec:~:text=nvdec%20and%20nvdec%2Dcopy%20are%20the%20newest%2C%20and%20recommended%20method%20to%20do%20hardware%20decoding%20on%20Nvidia%20GPUs.)
+
 ### Default Shader for HD Content
 
 The default shader for 720p–1080p content is CuNNy, which requires Vulkan and is tuned for anime:
