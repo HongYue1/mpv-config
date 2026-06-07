@@ -10,24 +10,27 @@ end)
 
 -- 2. Smart Paste (Strips Windows Quotes & prevents crashes)
 mp.register_script_message("smart-paste", function(mode)
-    local text = mp.get_property("clipboard/text")
+-- Explicitly tell mpv to fetch the latest clipboard data first
+mp.commandv("update-clipboard", "text")
 
-    if not text or text == "" then
-        mp.osd_message("Clipboard empty!")
-        return
+local text = mp.get_property("clipboard/text")
+
+if not text or text == "" then
+    mp.osd_message("Clipboard empty!")
+    return
     end
 
     -- Clean up the string by removing surrounding double quotes ("Copy as path")
-    if text:sub(1, 1) == '"' and text:sub(-1) == '"' then
-        text = text:sub(2, -2)
+if text:sub(1, 1) == '"' and text:sub(-1) == '"' then
+    text = text:sub(2, -2)
     end
 
     -- Load the file based on the mode requested
     if mode == "append" then
         mp.commandv("loadfile", text, "append-play")
         mp.osd_message("Added to playlist")
-    else
-        mp.commandv("loadfile", text, "replace")
-        mp.osd_message("Playing from clipboard")
-    end
+        else
+            mp.commandv("loadfile", text, "replace")
+            mp.osd_message("Playing from clipboard")
+            end
 end)
