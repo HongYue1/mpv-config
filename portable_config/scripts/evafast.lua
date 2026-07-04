@@ -93,6 +93,7 @@ local secondary_sub_visible = true
 local lookahead_cache_time = -INF
 local lookahead_cache_media_time = 0
 local lookahead_cache_value = nil
+local last_observed_sub_delay = nil
 local last_speed_osd_time = -INF
 
 local state = {
@@ -377,6 +378,11 @@ local function seconds_to_next_subtitle()
 
         pcall(mp.set_property_number, delay_prop, old_delay)
 
+        if not secondary then
+            -- Pre-set the dedupe baseline so the async restore callback is a no-op.
+            last_observed_sub_delay = old_delay
+        end
+
         if ok then
             local delta = old_delay - new_delay
             if delta > 0 then
@@ -522,8 +528,11 @@ local function show_speed(speed)
         uosc_available = false
     end
 
-    -- Duration passed dynamically in seconds (not multiplied to prevent long-locking)
-    mp.osd_message(("▶▶ x%.2f"):format(speed), opts.speed_osd_interval or 0.5)
+    -- Duration passed dynamically in seconds (not multiplied to prevent long-locking).
+    -- speed_osd_interval=0 disables throttling, so fall back to a fixed flash
+    -- duration here (0 is truthy in Lua, so `or 0.5` alone would not catch it).
+    local dur = opts.speed_osd_interval > 0 and opts.speed_osd_interval or 0.5
+    mp.osd_message(("▶▶ x%.2f"):format(speed), dur)
 end
 
 local function reset_state_at_normal_speed()
@@ -840,7 +849,17 @@ if opts.subs_speed_cap then
         mp.observe_property("secondary-sid", "native", invalidate_lookahead_cache)
     end
 
-    mp.observe_property("sub-delay", "native", invalidate_lookahead_cache)
+    mp.observe_property("sub-delay", "native", function(_, value)
+        -- Dedupe by value: the subtitle probe restores sub-delay to its original
+        -- value, but that observer callback is delivered asynchronously (possibly
+        -- after probing_subs is cleared). Skipping no-op changes prevents
+        -- needlessly invalidating a freshly computed lookahead cache.
+        if value == last_observed_sub_delay then
+            return
+        end
+        last_observed_sub_delay = value
+        invalidate_lookahead_cache()
+    end)
     mp.observe_property("sid", "native", invalidate_lookahead_cache)
 end
 
