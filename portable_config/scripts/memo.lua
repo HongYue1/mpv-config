@@ -1671,7 +1671,7 @@ mp.add_key_binding(nil, "memo-search", function()
     mp.commandv("script-message-to", "console", "type", "script-message memo-search: ")
 end)
 
-mp.add_key_binding("h", "memo-history", open_history)
+mp.add_key_binding(nil, "memo-history", open_history)
 
 mp.register_event("file-loaded", file_loaded)
 
