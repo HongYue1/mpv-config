@@ -137,7 +137,10 @@ local thumbnail_bgra = o.thumbnail .. ".bgra"
 
 local mpv_path = o.mpv_path
 if is_windows and mpv_path == "mpv" then
-    mpv_path = mp.get_property_native("user-data/frontend/process-path") or mpv_path
+    local frontend_path = mp.get_property_native("user-data/frontend/process-path")
+    if type(frontend_path) == "string" and frontend_path ~= "" then
+        mpv_path = frontend_path
+    end
 end
 
 local properties = {}
@@ -159,7 +162,6 @@ local show_thumbnail = false
 local overlay_visible = false
 
 local has_vid = 0
-local last_has_vid = 0
 
 local last_seek_time
 local allow_fast_seek = true
@@ -1161,7 +1163,6 @@ local function sync_property_to_child(prop, val)
     if prop == "vid" then
         if val == false or val == "no" then
             has_vid = 0
-            last_has_vid = 0
             publish_info(effective_w, effective_h, true)
             clear(true)
             stop_current(true)
@@ -1189,7 +1190,6 @@ local function remember_state(vf_reset, full_vf, rotate, crop)
     last_rotate = rotate
     last_par = par
     last_crop = crop
-    last_has_vid = has_vid
 end
 
 local function disable_and_stop_if_needed()
@@ -1384,7 +1384,6 @@ local function file_loaded()
     last_par = ""
     last_crop = nil
     last_rotate = 0
-    last_has_vid = 0
 
     remove_thumbnail_files()
     refresh_cached_file_properties()
