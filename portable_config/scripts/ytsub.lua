@@ -298,8 +298,15 @@ local function filter_sub(path)
     -- Disabled by default because it is format-specific and destructive.
     local lines = {}
 
-    for line in io.lines(path) do
-        table.insert(lines, line)
+    local read_ok, read_err = pcall(function()
+        for line in io.lines(path) do
+            table.insert(lines, line)
+        end
+    end)
+
+    if not read_ok then
+        osd_warn("failed to read subtitle for filtering: " .. tostring(read_err))
+        return
     end
 
     local out, err = io.open(path, "w")
@@ -1220,5 +1227,3 @@ if options.autoload_on_file_load then
         mp.add_timeout(delay, ytsub_auto)
     end)
 end
-
-ensure_dir(options.cache_dir)
