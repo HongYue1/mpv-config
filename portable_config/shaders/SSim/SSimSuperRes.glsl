@@ -10,7 +10,7 @@
 //!BIND HOOKED
 //!SAVE LOWRES
 //!HEIGHT NATIVE_CROPPED.h
-//!WHEN NATIVE_CROPPED.h OUTPUT.h <
+//!WHEN NATIVE_CROPPED.w OUTPUT.w < NATIVE_CROPPED.h OUTPUT.h < +
 //!COMPONENTS 4
 //!DESC SSSR Downscale Y
 
@@ -85,8 +85,7 @@ vec4 hook()
 //!BIND LOWRES
 //!SAVE LOWRES
 //!WIDTH NATIVE_CROPPED.w
-//!HEIGHT NATIVE_CROPPED.h
-//!WHEN NATIVE_CROPPED.w OUTPUT.w <
+//!WHEN NATIVE_CROPPED.w OUTPUT.w < NATIVE_CROPPED.h OUTPUT.h < +
 //!COMPONENTS 4
 //!DESC SSSR Downscale X
 
@@ -168,7 +167,7 @@ vec4 hook()
 //!SAVE var
 //!WIDTH NATIVE_CROPPED.w
 //!HEIGHT NATIVE_CROPPED.h
-//!WHEN NATIVE_CROPPED.h OUTPUT.h <
+//!WHEN NATIVE_CROPPED.w OUTPUT.w < NATIVE_CROPPED.h OUTPUT.h < +
 //!COMPONENTS 4
 //!DESC SSSR Variance/Covariance
 
@@ -263,7 +262,7 @@ vec4 hook()
 //!BIND PREKERNEL
 //!BIND LOWRES
 //!BIND var
-//!WHEN NATIVE_CROPPED.h OUTPUT.h <
+//!WHEN NATIVE_CROPPED.w OUTPUT.w < NATIVE_CROPPED.h OUTPUT.h < +
 //!DESC SSSR Final
 
 // Main detail strength.
@@ -298,7 +297,7 @@ float sssrKernel3(float x)
     return max(cos(SSSR_PI_OVER_3 * x), 0.0);
 }
 
-float sssrConfidence(vec3 v, float extraVar)
+vec2 sssrConfSlope(vec3 v, float extraVar)
 {
     float varL = max(v.x, SSSR_EPS);
     float varH = max(v.y + extraVar, SSSR_EPS);
@@ -306,20 +305,13 @@ float sssrConfidence(vec3 v, float extraVar)
 
     float corr = cov * inversesqrt(max(varL * varH, SSSR_EPS));
     corr = clamp(corr, 0.0, 1.0);
-
-    return smoothstep(SSSR_CORR_LOW, SSSR_CORR_HIGH, corr);
-}
-
-float sssrRegressionSlope(vec3 v, float extraVar)
-{
-    float varL = max(v.x, SSSR_EPS);
-    float varH = max(v.y + extraVar, SSSR_EPS);
-    float cov  = max(v.z, 0.0);
+    float conf = smoothstep(SSSR_CORR_LOW, SSSR_CORR_HIGH, corr);
 
     float ratioSlope = sqrt(varL / varH);
     float regSlope = cov / varH;
+    float slope = min(regSlope, ratioSlope * SSSR_MAX_SLOPE);
 
-    return min(regSlope, ratioSlope * SSSR_MAX_SLOPE);
+    return vec2(conf, slope);
 }
 
 #define SSSR_H(X,Y) LOWRES_tex(LOWRES_pt * (base + vec2(float(X), float(Y))))
@@ -333,8 +325,8 @@ vec3 vv = SSSR_V(X,Y);                                                          
 float colorErr = sssrSqLuma(c0rgb - (H).rgb);                                      \
 float w = (K) / (colorErr + (H).a + SSSR_WEIGHT_EPS);                              \
 \
-float conf = sssrConfidence(vv, mVar);                                             \
-float slope = sssrRegressionSlope(vv, mVar);                                       \
+vec2 confSlope = sssrConfSlope(vv, mVar);                                             \
+float conf = confSlope.x; float slope = confSlope.y;                                       \
 float r = -(1.0 + SSSR_OVERSHARP) * slope;                                         \
 \
 vec3 force = lSample - c0rgb + r * ((H).rgb - c0rgb);                              \
@@ -406,8 +398,9 @@ vec4 hook()
     vec3 acc = vec3(0.0);
     float weightSum = 0.0;
 
-    vec3 lMin = vec3( 1e20);
-    vec3 lMax = vec3(-1e20);
+    vec3 lCenter = SSSR_L(0, 0);
+    vec3 lMin = lCenter;
+    vec3 lMax = lCenter;
 
     SSSR_ADD_TAP(-1, -1, h_mm, kxm * kym);
     SSSR_ADD_TAP( 0, -1, h_0m, kx0 * kym);
