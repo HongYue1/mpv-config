@@ -39,14 +39,17 @@ for str in string.gmatch(string.lower(options.categories), "([^;]+)") do
 	categories[#categories + 1] = str
 end
 
+-- forward declarations so these functions stay file-local
+local skip_ads, fetch_sponsor_segments, fetch_ranges, get_ranges_from_chapters, file_loaded, end_file, toggle
+
 function skip_ads(name,pos)
 	if pos then
 		for _, i in pairs(ranges) do
-			v = i.segment[2]
+			local v = i.segment[2]
 			if i.segment[1] <= pos and v > pos then
 				--this message may sometimes be wrong
 				--it only seems to be a visual thing though
-				mp.osd_message(("[sponsorblock] skipping forward %ds"):format(math.floor(v-mp.get_property("time-pos"))))
+				mp.osd_message(("[sponsorblock] skipping forward %ds"):format(math.floor(v - pos)))
 				--need to do the +0.01 otherwise mpv will start spamming skip sometimes
 				--example: https://www.youtube.com/watch?v=4ypMJzeNooo
 				mp.set_property("time-pos",v+0.01)
@@ -135,7 +138,7 @@ function get_ranges_from_chapters()
 	local have_sponsorblock_chapters = false
 
 	for i, chapter in ipairs(chapters) do
-		local categories_string = string.match(chapter.title, "%[SponsorBlock%]:%s(.+)")
+		local categories_string = chapter.title and string.match(chapter.title, "%[SponsorBlock%]:%s(.+)")
 
 		if categories_string then
 			have_sponsorblock_chapters = true
