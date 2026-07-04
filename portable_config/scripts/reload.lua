@@ -79,6 +79,13 @@ local property_path = nil
 local property_time_pos = 0
 local property_keep_open = nil
 
+-- forward declarations so the functions defined below stay file-local
+local read_settings, reload, reload_resume, reload_eof, on_file_loaded, round
+
+-- set true by reload_resume() so on_file_loaded() only runs the un-stick
+-- keypress workaround right after an actual reload, not on every file load
+local reload_pending = false
+
 -- FSM managing the demuxer cache.
 --
 -- States:
@@ -295,6 +302,7 @@ function reload(path, time_pos)
 end
 
 function reload_resume()
+  reload_pending = true
   local path = mp.get_property("path", property_path)
   local time_pos = mp.get_property("time-pos")
   local reload_duration = mp.get_property_native("duration")
@@ -339,7 +347,7 @@ function reload_eof(property, eof_reached)
   local time_pos = mp.get_property_number("time-pos")
   local duration = mp.get_property_number("duration")
 
-  if eof_reached and round(time_pos) == round(duration) then
+  if eof_reached and time_pos and duration and round(time_pos) == round(duration) then
     msg.debug("property_time_pos", property_time_pos, "time_pos", time_pos)
 
     -- Check that playback time_pos made progress after the last reload. When
@@ -380,12 +388,18 @@ function on_file_loaded(event)
   -- What didn't work:
   -- - Cycling through the `pause` property.
   -- - Run the `playlist-play-index current` command.
-  mp.commandv("keypress", 'SPACE')
-  mp.commandv("keypress", 'SPACE')
+  -- Only needed right after an actual reload, not on every file load, so it is
+  -- gated behind reload_pending to avoid firing whatever SPACE is bound to.
+  if reload_pending then
+    reload_pending = false
+    mp.commandv("keypress", 'SPACE')
+    mp.commandv("keypress", 'SPACE')
+  end
 end
 
 -- Round positive numbers.
 function round(num)
+  if num == nil then return nil end
   return math.floor(num + 0.5)
 end
 
