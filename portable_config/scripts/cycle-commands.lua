@@ -401,8 +401,6 @@ local function show_post_osd(opts)
             ))
 
             value = UNAVAILABLE
-        elseif value == nil then
-            value = UNAVAILABLE
         end
 
         mp.osd_message(
