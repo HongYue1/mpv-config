@@ -293,7 +293,7 @@ vec4 hook()
 
 // Main detail strength (fused build: keep low, adaptive-sharpen does sharpening).
 // Original SSSR used oversharp = 0.5.
-#define SSSR_OVERSHARP 0.40
+#define SSSR_OVERSHARP 0.30
 
 // Anti-ringing blend.
 // 0.0 = disabled.
@@ -498,7 +498,7 @@ vec4 hook()
 
 //--------------------------------------- Settings ------------------------------------------------
 
-#define curve_height    1.0                  // Main control of sharpening strength [>0]
+#define curve_height    0.6                  // Main control of sharpening strength [>0]
                                              // 0.3 <-> 2.0 is a reasonable range of values
 
 #define overshoot_ctrl  false                // Allow for higher overshoot if the current edge pixel
@@ -522,7 +522,7 @@ vec4 hook()
 
 // ---- SSSR confidence-gating settings (fused mode) --------------------------
 #define SSSR_AS_CONF_FLOOR 0.30   // sharpen multiplier in low-confidence (noisy) areas   [<1 attenuates noise]
-#define SSSR_AS_CONF_CEIL  1.50   // sharpen multiplier in high-confidence (real detail)  [>1 boosts trusted detail]
+#define SSSR_AS_CONF_CEIL  1.00   // sharpen multiplier in high-confidence (real detail)  [>1 boosts trusted detail]
 #define SSSR_AS_CORR_LOW   0.05   // correlation below this => fully uncertain (keep in sync with Pass 4 SSSR_CORR_LOW)
 #define SSSR_AS_CORR_HIGH  0.45   // correlation above this => fully trusted   (keep in sync with Pass 4 SSSR_CORR_HIGH)
 #define SSSR_AS_EPS        1e-6
