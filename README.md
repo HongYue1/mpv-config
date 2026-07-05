@@ -122,6 +122,7 @@ This config defaults to Vulkan. If your GPU doesn't support Vulkan or you have p
 gpu-api=vulkan      # change to: auto, d3d11, or opengl
 hwdec=vulkan        # change to: auto, auto-copy, or auto-safe
 ```
+
 > [!Note]
 > On Linux Set hwdec to auto or auto-copy (try both) if you face any playback issues especially with youtube videos.
 
@@ -130,12 +131,12 @@ hwdec=vulkan        # change to: auto, auto-copy, or auto-safe
 
 ### Default Shader for HD Content
 
-The default shader for 720p–1080p content is CuNNy, which requires Vulkan and is tuned for anime:
+The default shader for 720p–1080p content is modified shader combining SSimSuperRes and adaptive-sharpen with some modifications which is great for live action and good should be relativly good for Anime too. Also compared to CuNNY as a default, it's more general and doesn't requrie vulkan.
 
 **`profiles.conf`**
 
 ```conf
-glsl-shader="~~/shaders/CuNNy/ds/dp4a/CuNNy-4x16-DS-Q.glsl"
+glsl-shader="~~/shaders/SSim/SSSR+AdaptiveSharpening_Medium_Sharpening.glsl"
 ```
 
 > [!Note]
@@ -261,34 +262,37 @@ The uosc right-click menu exposes the full shader library, grouped by type. All 
 Shaders are organized by category in `portable_config/shaders/`. All are accessible and documented in `input.conf`.
 
 **Luma Upscalers**
-| Shader | Best for |
-|---|---|
-| [CuNNy](https://github.com/funnyplanter/CuNNy) | Anime — fast CNN upscaler with multiple quality tiers and dp4a acceleration |
-| [ArtCNN](https://github.com/Artoriuz/ArtCNN) | General content — modern CNN upscaler with denoising and downscaling variants |
-| [Ani4Kv2 / AniSD](https://github.com/Sirosky/Upscale-Hub) | Anime — Ani4Kv2 for HD/BD, AniSD for sub-720p sources |
-| [FSRCNNX](https://github.com/igv/FSRCNN-TensorFlow/releases) | Live-action — high quality prescaler, x2 8-0-4-1 and 16-0-4-1 variants |
-| [NNEDI3](https://github.com/bjin/mpv-prescalers) | High-quality prescaling, slower than FSRCNNX |
-| [RAVU](https://github.com/bjin/mpv-prescalers) | Fast prescaling — Lite, Zoom, and Antiringing variants |
-| [Anime4K](https://github.com/bloc97/Anime4K/tree/master/glsl) | Anime upscaling and restoration — full shader set included |
-| [ACNet / ARNet](https://github.com/TianZerL/ACNetGLSL) | Lightweight anime upscalers from Anime4KCPP with denoising variants |
-| [AMD CAS, FSR, NVScaler, NVSharpen](https://gist.github.com/agyild) | GPU vendor upscalers and sharpeners |
+
+| Shader                                                              | Best for                                                                      |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [CuNNy](https://github.com/funnyplanter/CuNNy)                      | Anime — fast CNN upscaler with multiple quality tiers and dp4a acceleration   |
+| [ArtCNN](https://github.com/Artoriuz/ArtCNN)                        | General content — modern CNN upscaler with denoising and downscaling variants |
+| [Ani4Kv2 / AniSD](https://github.com/Sirosky/Upscale-Hub)           | Anime — Ani4Kv2 for HD/BD, AniSD for sub-720p sources                         |
+| [FSRCNNX](https://github.com/igv/FSRCNN-TensorFlow/releases)        | Live-action — high quality prescaler, x2 8-0-4-1 and 16-0-4-1 variants        |
+| [NNEDI3](https://github.com/bjin/mpv-prescalers)                    | High-quality prescaling, slower than FSRCNNX                                  |
+| [RAVU](https://github.com/bjin/mpv-prescalers)                      | Fast prescaling — Lite, Zoom, and Antiringing variants                        |
+| [Anime4K](https://github.com/bloc97/Anime4K/tree/master/glsl)       | Anime upscaling and restoration — full shader set included                    |
+| [ACNet / ARNet](https://github.com/TianZerL/ACNetGLSL)              | Lightweight anime upscalers from Anime4KCPP with denoising variants           |
+| [AMD CAS, FSR, NVScaler, NVSharpen](https://gist.github.com/agyild) | GPU vendor upscalers and sharpeners                                           |
 
 **Chroma Upscalers**
-| Shader | Notes |
-|---|---|
-| [CfL Prediction](https://github.com/Artoriuz/glsl-chroma-from-luma-prediction) | Default — uses luma information to reconstruct chroma detail |
-| [KrigBilateral](https://gist.github.com/igv) | Alternative chroma upscaler |
-| [JointBilateral / FastBilateral](https://github.com/Artoriuz/glsl-joint-bilateral) | Bilateral filter-based chroma upscalers |
+
+| Shader                                                                             | Notes                                                        |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| [CfL Prediction](https://github.com/Artoriuz/glsl-chroma-from-luma-prediction)     | Default — uses luma information to reconstruct chroma detail |
+| [KrigBilateral](https://gist.github.com/igv)                                       | Alternative chroma upscaler                                  |
+| [JointBilateral / FastBilateral](https://github.com/Artoriuz/glsl-joint-bilateral) | Bilateral filter-based chroma upscalers                      |
 
 **Downscalers / Sharpeners / Other**
-| Shader | Notes |
-|---|---|
-| [SSimDownscaler](https://gist.github.com/igv) | Perceptually better downscaling, used automatically for 4K+ sources |
-| [SSimSuperRes](https://gist.github.com/igv) | An accurate sharpener + antiringing shader |
-| [nlmeans](https://github.com/AN3223/dotfiles) | Non-local means denoiser |
-| [hdeband](https://github.com/AN3223/dotfiles) | Shader-based debanding |
-| [adaptive-sharpen](https://gist.github.com/igv) | Content-aware sharpening |
-| [Film Grain](https://github.com/haasn/gentoo-conf) | Adds synthetic film grain (normal and smooth variants) |
+
+| Shader                                             | Notes                                                               |
+| -------------------------------------------------- | ------------------------------------------------------------------- |
+| [SSimDownscaler](https://gist.github.com/igv)      | Perceptually better downscaling, used automatically for 4K+ sources |
+| [SSimSuperRes](https://gist.github.com/igv)        | An accurate sharpener + antiringing shader                          |
+| [nlmeans](https://github.com/AN3223/dotfiles)      | Non-local means denoiser                                            |
+| [hdeband](https://github.com/AN3223/dotfiles)      | Shader-based debanding                                              |
+| [adaptive-sharpen](https://gist.github.com/igv)    | Content-aware sharpening                                            |
+| [Film Grain](https://github.com/haasn/gentoo-conf) | Adds synthetic film grain (normal and smooth variants)              |
 
 ---
 
