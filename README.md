@@ -232,6 +232,20 @@ video-sync=display-resample
 
 This slightly increases CPU/GPU usage but makes the UI feel more responsive. The root cause is that mpv ties UI rendering frequency to the video frame rate during playback — pausing the video will reveal the difference.
 
+### Ghosting or Scene Retention with VRR (G-Sync / FreeSync)
+
+If you notice ghosting, smearing, or a faint "hold" of the previous scene on hard cuts — especially with low-framerate content (24/25 fps film) — the cause is almost always **Variable Refresh Rate (G-Sync / FreeSync)**, not mpv or the shaders. (It happens with all shaders disabled too.)
+
+Your panel's pixel overdrive is calibrated for its maximum refresh rate. When VRR lowers the panel to a low/variable refresh to match 24/25 fps video, the overdrive is mistuned and pixels smear. Below the VRR floor (~48 Hz), Low Framerate Compensation duplicates frames, which reads as scene retention on cuts.
+
+**Fix:** for video playback, use a **fixed refresh rate** that is an integer multiple of the content frame rate instead of VRR:
+
+- 25 fps → **150 Hz** (even 6:6 cadence)
+- 24 fps → **144 Hz** (6:6) or 120 Hz (5:5)
+
+> [!Note]
+> On NVIDIA, add `mpv` under **NVIDIA Control Panel → Manage 3D Settings → Program Settings** and set **Monitor Technology = Fixed Refresh**. This removes the ghosting and cadence judder at no extra GPU/power cost — no frame interpolation required.
+
 ### Toggle the UI
 
 Press `Tab` to toggle uosc between always-visible and auto-hide mode.

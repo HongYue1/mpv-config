@@ -298,7 +298,7 @@ vec4 hook()
 // Anti-ringing blend.
 // 0.0 = disabled.
 // 0.20 - 0.40 recommended.
-#define SSSR_ANTIRINGING 0.30
+#define SSSR_ANTIRINGING 0.40
 
 // Correlation gate.
 // Detail is injected mostly where PREKERNEL and LOWRES structure agree.
@@ -306,7 +306,7 @@ vec4 hook()
 #define SSSR_CORR_HIGH 0.45
 
 // Safety clamp for the regression/range gain.
-#define SSSR_MAX_SLOPE 2.50
+#define SSSR_MAX_SLOPE 2.10
 
 const vec3  SSSR_LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float SSSR_PI_OVER_3 = 1.04719755119659774615;
