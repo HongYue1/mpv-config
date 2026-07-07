@@ -234,17 +234,20 @@ This slightly increases CPU/GPU usage but makes the UI feel more responsive. The
 
 ### Ghosting or Scene Retention with VRR (G-Sync / FreeSync)
 
-If you notice ghosting, smearing, or a faint "hold" of the previous scene on hard cuts — especially with low-framerate content (24/25 fps film) — the cause is almost always **Variable Refresh Rate (G-Sync / FreeSync)**, not mpv or the shaders. (It happens with all shaders disabled too.)
+If you notice ghosting, smearing, a faint "hold" of the previous scene on hard cuts, or a **dark trail behind moving objects (often worst in fullscreen)** — especially with low-framerate content (24/25 fps film) — the cause is almost always **Variable Refresh Rate (G-Sync / FreeSync)**, not mpv or the shaders. (It happens with all shaders disabled too.)
 
-Your panel's pixel overdrive is calibrated for its maximum refresh rate. When VRR lowers the panel to a low/variable refresh to match 24/25 fps video, the overdrive is mistuned and pixels smear. Below the VRR floor (~48 Hz), Low Framerate Compensation duplicates frames, which reads as scene retention on cuts.
+Your panel's pixel overdrive is calibrated for its maximum refresh rate. When VRR lowers the panel to a low/variable refresh to match 24/25 fps video, the overdrive is mistuned and pixels smear or trail. Below the VRR floor (~48 Hz), Low Framerate Compensation duplicates frames, which reads as scene retention on cuts.
 
-**Fix:** for video playback, use a **fixed refresh rate** that is an integer multiple of the content frame rate instead of VRR:
+**Fix:** force mpv to a **fixed refresh rate** instead of VRR. Note that the per-app **Monitor Technology = Fixed Refresh** option in NVIDIA Control Panel is often *not* enforced in exclusive fullscreen — G-Sync quietly re-engages there. The reliable fix is [NVIDIA Profile Inspector](https://github.com/Orbmu2k/nvidiaProfileInspector):
 
-- 25 fps → **150 Hz** (even 6:6 cadence)
-- 24 fps → **144 Hz** (6:6) or 120 Hz (5:5)
+1. Open NVIDIA Profile Inspector and create/select a profile that applies to `mpv.exe`.
+2. Under **2 - Sync and Refresh**, set **GSYNC - Application State** to **Fixed Refresh Rate** (`Force Off` also works).
+3. Apply. You can leave G-Sync enabled globally for games — only mpv is forced to fixed refresh.
+
+This keeps the panel at its native max refresh during playback (e.g. 165 Hz), where the pixel overdrive is correctly tuned, which eliminates the trailing/ghosting in both windowed and fullscreen — at no extra GPU/power cost and with no frame interpolation.
 
 > [!Note]
-> On NVIDIA, add `mpv` under **NVIDIA Control Panel → Manage 3D Settings → Program Settings** and set **Monitor Technology = Fixed Refresh**. This removes the ghosting and cadence judder at no extra GPU/power cost — no frame interpolation required.
+> Optional: choosing a fixed refresh that is an integer multiple of the frame rate (25 fps → 150 Hz, 24 fps → 144 Hz) also removes the mild motion judder from non-integer ratios (e.g. 165 ÷ 25 = 6.6). That is about smoothness, and is separate from the ghosting fix above.
 
 ### Toggle the UI
 
