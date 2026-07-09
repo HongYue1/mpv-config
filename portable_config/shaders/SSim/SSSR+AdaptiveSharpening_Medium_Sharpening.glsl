@@ -490,7 +490,7 @@ vec4 hook()
 // Adaptive sharpen - version 2021-10-17
 // Tuned for use post-resize
 
-//!HOOK OUTPUT
+//!HOOK POSTKERNEL
 //!BIND HOOKED
 //!BIND var
 //!WHEN NATIVE_CROPPED.w OUTPUT.w < NATIVE_CROPPED.h OUTPUT.h < +
