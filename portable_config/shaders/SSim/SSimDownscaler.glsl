@@ -104,8 +104,8 @@ vec4 hook() {
 #define Luma(rgb)   ( dot(rgb, vec3(0.2126, 0.7152, 0.0722)) )
 
 mat3x3 ScaleH(vec2 pos) {
-    float low  = ceil(-0.5*taps)[0];
-    float high = floor(0.5*taps)[0];
+    float low  = ceil(-0.5*taps);
+    float high = floor(0.5*taps);
 
     float W = 0.0;
     mat3x3 avg = mat3x3(0);
@@ -127,8 +127,8 @@ mat3x3 ScaleH(vec2 pos) {
 vec4 hook() {
     vec2 pos = HOOKED_pos;
 
-    float low  = ceil(-0.5*taps)[1];
-    float high = floor(0.5*taps)[1];
+    float low  = ceil(-0.5*taps);
+    float high = floor(0.5*taps);
 
     float W = 0.0;
     mat3x3 avg = mat3x3(0);
@@ -160,8 +160,8 @@ vec4 hook() {
 #define taps        3.0
 
 mat3x3 ScaleH(vec2 pos) {
-    float low  = ceil(-0.5*taps)[0];
-    float high = floor(0.5*taps)[0];
+    float low  = ceil(-0.5*taps);
+    float high = floor(0.5*taps);
 
     float W = 0.0;
     mat3x3 avg = mat3x3(0);
@@ -183,8 +183,8 @@ mat3x3 ScaleH(vec2 pos) {
 vec4 hook() {
     vec2 pos = HOOKED_pos;
 
-    float low  = ceil(-0.5*taps)[1];
-    float high = floor(0.5*taps)[1];
+    float low  = ceil(-0.5*taps);
+    float high = floor(0.5*taps);
 
     float W = 0.0;
     mat3x3 avg = mat3x3(0);
