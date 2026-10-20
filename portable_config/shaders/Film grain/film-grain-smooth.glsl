@@ -1,10 +1,30 @@
 //!HOOK LUMA
 //!BIND HOOKED
-//!DESC gaussian smoothed film grain
+//!DESC film grain smooth v2 (gaussian, race-free, variance-corrected)
 //!COMPUTE 32 32
 
-#define INTENSITY 0.1
-#define TAPS 2
+// Coarse (low-pass) grain. Use this only when you actually want a clumpy
+// film look, or when per-pixel grain is too fine to survive your display.
+// For masking compression artifacts, the fine version is better.
+//
+// Fixed vs. the original:
+//   * the horizontal pass wrote back into the array it was still reading
+//     from, with no barrier -> data race -> blotchy 32x32 tile structure
+//   * seed indexing transposed x/y
+//   * blurring destroys ~65% of the grain's RMS; now restored, so INTENSITY
+//     means the same thing here as in the fine shader
+//   * float-hash precision loss at high resolutions
+
+// ---------------------------------------------------------------- tunables
+#define INTENSITY        0.045
+#define TAPS             2      // grain radius: 1 = tight, 5 = very clumpy
+#define SHADOW_CUTOFF    0.04
+#define SHADOW_KNEE      0.18
+#define HIGHLIGHT_KNEE   0.80
+#define HIGHLIGHT_CUTOFF 1.00
+#define TEMPORAL_DIV     1      // 1 = every frame, 2 = every 2nd, 0 = static
+#define CLAMP_OUTPUT     1
+// ---------------------------------------------------------------------------
 
 const uint row_size = 2 * TAPS + 1;
 const float weights[row_size] = {
@@ -60,81 +80,94 @@ const float weights[row_size] = {
 };
 
 const uvec2 isize = uvec2(gl_WorkGroupSize) + uvec2(2 * TAPS);
-shared float grain[isize.y][isize.x];
 
-// PRNG
-float permute(float x)
+shared float grain[isize.y][isize.x];             // raw noise + apron
+shared float tmp[isize.y][gl_WorkGroupSize.x];    // horizontally filtered
+
+uint hash3(uvec3 v)
 {
-    x = (34.0 * x + 1.0) * x;
-    return fract(x * 1.0/289.0) * 289.0;
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return v.x;
 }
 
-float seed(uvec2 pos)
+float to_gaussian(float u)
 {
-    const float phi = 1.61803398874989;
-    vec3 m = vec3(fract(phi * vec2(pos)), random) + vec3(1.0);
-    return permute(permute(m.x) + m.y) + m.z;
-}
-
-float rand(inout float state)
-{
-    state = permute(state);
-    return fract(state * 1.0/41.0);
-}
-
-// Turns uniform white noise into gaussian white noise by passing it
-// through an approximation of the gaussian quantile function
-float rand_gaussian(inout float state) {
-    const float a0 = 0.151015505647689;
+    const float a0 =  0.151015505647689;
     const float a1 = -0.5303572634357367;
-    const float a2 = 1.365020122861334;
-    const float b0 = 0.132089632343748;
+    const float a2 =  1.365020122861334;
+    const float b0 =  0.132089632343748;
     const float b1 = -0.7607324991323768;
 
-    float p = 0.95 * rand(state) + 0.025;
+    float p = 0.95 * u + 0.025;
     float q = p - 0.5;
     float r = q * q;
 
-    float g = q * (a2 + (a1 * r + a0) / (r*r + b1*r + b0));
-    g *= 0.255121822830526; // normalize to [-1,1)
-    return g;
+    return q * (a2 + (a1 * r + a0) / (r * r + b1 * r + b0)) * 0.255121822830526;
+}
+
+// Seeded from global pixel coordinates, so tile aprons match their neighbours
+// exactly and no seam appears at workgroup borders.
+float grain_at(ivec2 pos, uint t)
+{
+    return to_gaussian(float(hash3(uvec3(uvec2(pos + 32768), t))) * (1.0 / 4294967296.0));
 }
 
 void hook()
 {
-    // generate grain in `grain`
+#if TEMPORAL_DIV > 0
+    uint t = uint(max(frame, 0)) / uint(TEMPORAL_DIV);
+#else
+    uint t = 0u;
+#endif
+
     uint num_threads = gl_WorkGroupSize.x * gl_WorkGroupSize.y;
-    for (uint i = gl_LocalInvocationIndex; i < isize.y * isize.x; i += num_threads) {
-        uvec2 pos = uvec2(i % isize.y, i / isize.y);
-        float state = seed(gl_WorkGroupID.xy * gl_WorkGroupSize.xy + pos);
-        grain[pos.y][pos.x] = rand_gaussian(state);
+    ivec2 base = ivec2(gl_WorkGroupID.xy * gl_WorkGroupSize.xy) - ivec2(TAPS);
+
+    for (uint i = gl_LocalInvocationIndex; i < isize.x * isize.y; i += num_threads) {
+        uvec2 p = uvec2(i % isize.x, i / isize.x);
+        grain[p.y][p.x] = grain_at(base + ivec2(p), t);
     }
 
-    // make writes visible
     barrier();
 
-    // convolve horizontally
+    // horizontal pass -> separate buffer (no in-place read/write race)
     for (uint y = gl_LocalInvocationID.y; y < isize.y; y += gl_WorkGroupSize.y) {
-        float hsum = 0;
-        for (uint x = 0; x < row_size; x++) {
-            float g = grain[y][gl_LocalInvocationID.x + x];
-            hsum += weights[x] * g;
-        }
-
-        // update grain LUT
-        grain[y][gl_LocalInvocationID.x + TAPS] = hsum;
+        float hsum = 0.0;
+        for (uint x = 0; x < row_size; x++)
+            hsum += weights[x] * grain[y][gl_LocalInvocationID.x + x];
+        tmp[y][gl_LocalInvocationID.x] = hsum;
     }
 
     barrier();
 
-    // convolve vertically
     float vsum = 0.0;
-    for (uint y = 0; y < row_size; y++) {
-        float g = grain[gl_LocalInvocationID.y + y][gl_LocalInvocationID.x + TAPS];
-        vsum += weights[y] * g;
-    }
+    for (uint y = 0; y < row_size; y++)
+        vsum += weights[y] * tmp[gl_LocalInvocationID.y + y][gl_LocalInvocationID.x];
+
+    // Blurring N independent gaussians scales sigma by sqrt(sum(w^2)) per
+    // axis, i.e. sum(w^2) separably in 2D. Divide it back out to keep the
+    // grain as strong as the unsmoothed version.
+    float wss = 0.0;
+    for (uint i = 0; i < row_size; i++)
+        wss += weights[i] * weights[i];
+    vsum /= wss;
 
     vec4 color = HOOKED_tex(HOOKED_pos);
-    color.rgb += vec3(INTENSITY * vsum);
+
+    float l = clamp(color.x, 0.0, 1.0);
+    float w = smoothstep(SHADOW_CUTOFF, SHADOW_KNEE, l)
+            * (1.0 - smoothstep(HIGHLIGHT_KNEE, HIGHLIGHT_CUTOFF, l));
+
+    color.x += INTENSITY * w * vsum;
+#if CLAMP_OUTPUT
+    color.x = clamp(color.x, 0.0, 1.0);
+#endif
     imageStore(out_image, ivec2(gl_GlobalInvocationID), color);
 }
